@@ -13,24 +13,37 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BOT_ENTRYPOINT = PROJECT_ROOT / "service" / "run_bot.py"
+LOG_DIR = PROJECT_ROOT / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+WATCHDOG_LOG = LOG_DIR / "watchdog.log"
 
-# Guard against NoneType stdout/stderr when launched headlessly via wscript/pythonw
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w", encoding="utf-8")
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+# Safely route stdout/stderr to watchdog.log so headless wscript/pythonw execution never crashes
+try:
+    log_fp = open(WATCHDOG_LOG, "a", encoding="utf-8", buffering=1)
+    sys.stdout = log_fp
+    sys.stderr = log_fp
+except Exception:
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 
 
 def get_python_executable() -> str:
     """Find the best Python executable."""
-    # 1. Current sys.executable
+    # 1. Direct Python 3.14 installed path
+    py314 = Path(os.path.expanduser("~")) / "AppData" / "Local" / "Programs" / "Python" / "Python314" / "python.exe"
+    if py314.exists():
+        return str(py314)
+    # 2. Current sys.executable
     if sys.executable and "python" in sys.executable.lower():
         return sys.executable
-    # 2. Check Hermes venv
+    # 3. Check Hermes venv
     hermes_py = Path(os.path.expanduser("~")) / "AppData" / "Local" / "hermes" / "hermes-agent" / "venv" / "Scripts" / "python.exe"
     if hermes_py.exists():
         return str(hermes_py)
-    # 3. Default python
+    # 4. Default python
     return "python"
 
 
@@ -54,6 +67,8 @@ def run_supervisor():
             process = subprocess.Popen(
                 [python_exe, str(BOT_ENTRYPOINT)],
                 cwd=str(PROJECT_ROOT),
+                stdout=sys.stdout,
+                stderr=sys.stderr,
             )
             ret_code = process.wait()
             uptime = time.time() - start_time

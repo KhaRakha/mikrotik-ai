@@ -2,20 +2,20 @@
 # Pasang Auto-Start MikroTik AI Agent ke Windows Startup (Tanpa Hak Administrator)
 # ==============================================================================
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$VbsPath = Join-Path $ScriptDir "start_background.vbs"
+$LauncherPs1 = Join-Path $ScriptDir "start_background.ps1"
 $StartupFolder = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Startup)
 $ShortcutPath = Join-Path $StartupFolder "MikroTik-AI-Agent.lnk"
 
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host " Memasang Auto-Start MikroTik AI Agent ke Windows Startup" -ForegroundColor Cyan
-Write-Host " Target VBS : $VbsPath" -ForegroundColor Cyan
+Write-Host " Target : $LauncherPs1" -ForegroundColor Cyan
 Write-Host "================================================================" -ForegroundColor Cyan
 Write-Host ""
 
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = "wscript.exe"
-$Shortcut.Arguments = "`"$VbsPath`""
+$Shortcut.TargetPath = "powershell.exe"
+$Shortcut.Arguments = "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$LauncherPs1`""
 $Shortcut.WorkingDirectory = $ScriptDir
 $Shortcut.Description = "Auto-start MikroTik AI Agent Telegram Bot"
 $Shortcut.Save()

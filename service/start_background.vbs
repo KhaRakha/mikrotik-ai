@@ -5,7 +5,8 @@
 Set WshShell = CreateObject("WScript.Shell")
 Set FSO = CreateObject("Scripting.FileSystemObject")
 
-ScriptDir = FSO.GetParentFolderName(WScript.ScriptFullName)
+ScriptFullName = FSO.GetAbsolutePathName(WScript.ScriptFullName)
+ScriptDir = FSO.GetParentFolderName(ScriptFullName)
 ProjectDir = FSO.GetParentFolderName(ScriptDir)
 WshShell.CurrentDirectory = ProjectDir
 
@@ -17,7 +18,7 @@ If Not FSO.FileExists(PythonExe) Then
     PythonExe = "python.exe"
 End If
 
-Cmd = """" & PythonExe & """ """ & ScriptDir & "\watchdog.py"""
+Cmd = Chr(34) & PythonExe & Chr(34) & " " & Chr(34) & ScriptDir & "\watchdog.py" & Chr(34)
 
 ' 0 = Hide window completely, False = Do not wait for return
 WshShell.Run Cmd, 0, False
