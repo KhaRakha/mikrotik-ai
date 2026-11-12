@@ -55,9 +55,16 @@ class MockMikrotikClient(BaseMikrotikClient):
             "model": "RB750Gr3",
             "serial_number": "HD808ABCDEF12",
             "current_firmware": "7.15.2",
-            "upgrade_firmware": "7.15.2",
+            "upgrade_firmware": "7.16.1",
             "factory_firmware": "6.48.6",
             "board_name": "hEX",
+        }
+        self._package_update = {
+            "channel": "stable",
+            "installed_version": "7.15.2",
+            "latest_version": "7.16.1",
+            "status": "New version is available",
+            "changelog": "RouterOS v7.16.1: Menambahkan optimasi performa routing, perbaikan stabilitas REST API & Winbox v4, serta patch keamanan kernel.",
         }
         self._clock = {
             "time": "13:55:00",
@@ -813,4 +820,129 @@ class MockMikrotikClient(BaseMikrotikClient):
             data={"status": "SHUTTING_DOWN", "device": self.device_name},
             device=self.device_name,
             latency_ms=10.0,
+        )
+
+    def check_router_update(self, channel: str = "stable") -> OperationResult:
+        if channel:
+            self._package_update["channel"] = channel
+        has_update = self._package_update["installed_version"] != self._package_update["latest_version"]
+        self._package_update["update_available"] = has_update
+        msg = (
+            f"Update tersedia: v{self._package_update['installed_version']} ➔ v{self._package_update['latest_version']} (Channel: {self._package_update['channel']})."
+            if has_update
+            else f"Sistem sudah menggunakan versi terbaru (v{self._package_update['installed_version']})."
+        )
+        return OperationResult(
+            success=True,
+            message=msg,
+            data=dict(self._package_update),
+            device=self.device_name,
+            latency_ms=3.0,
+        )
+
+    def install_router_update(self, channel: str = "stable") -> OperationResult:
+        if channel:
+            self._package_update["channel"] = channel
+        old_ver = self._package_update["installed_version"]
+        new_ver = self._package_update["latest_version"]
+
+        # Apply upgrade
+        self._package_update["installed_version"] = new_ver
+        self._package_update["status"] = "System is already up to date"
+        self._package_update["update_available"] = False
+
+        # Update packages list
+        for pkg in self._packages:
+            pkg["version"] = new_ver
+
+        # Update system resource version
+        self._resources["version"] = f"{new_ver} (stable)"
+
+        # RouterBOARD upgrade firmware is now available to match new OS
+        self._routerboard["upgrade_firmware"] = new_ver
+
+        self._system_logs.append({
+            "time": time.strftime("%b/%d %H:%M:%S").lower(),
+            "topics": "system,info",
+            "message": f"system package upgraded from {old_ver} to {new_ver} and rebooted",
+        })
+
+        return OperationResult(
+            success=True,
+            message=(
+                f"🚀 **Upgrade RouterOS Berhasil Dimulai!**\n\n"
+                f"• Target Router : **{self.device_name}**\n"
+                f"• Versi Lama    : `v{old_ver}`\n"
+                f"• Versi Baru    : `v{new_ver}` (Channel: `{self._package_update['channel']}`)\n"
+                f"• Status        : Paket telah diunduh dan sistem sedang melakukan REBOOT otomatis.\n"
+                f"⏳ Router akan offline sementara selama 1-3 menit untuk proses flash writing dan reboot."
+            ),
+            data={
+                "status": "UPGRADE_INSTALLED_REBOOTING",
+                "old_version": old_ver,
+                "new_version": new_ver,
+                "device": self.device_name,
+            },
+            device=self.device_name,
+            latency_ms=15.0,
+        )
+
+    def upgrade_routerboard_firmware(self) -> OperationResult:
+        curr = self._routerboard.get("current_firmware", "7.15.2")
+        upg = self._routerboard.get("upgrade_firmware", "7.16.1")
+
+        self._routerboard["current_firmware"] = upg
+        self._system_logs.append({
+            "time": time.strftime("%b/%d %H:%M:%S").lower(),
+            "topics": "system,info",
+            "message": f"routerboard firmware upgraded from {curr} to {upg}",
+        })
+
+        return OperationResult(
+            success=True,
+            message=(
+                f"⚡ **Upgrade Firmware RouterBOARD Berhasil!**\n\n"
+                f"• Target Router    : **{self.device_name}**\n"
+                f"• Model Hardware   : `{self._routerboard.get('model', 'RB750Gr3')}`\n"
+                f"• Serial Number    : `{self._routerboard.get('serial_number', '-')}`\n"
+                f"• Firmware Bootloader : `{curr}` ➔ `v{upg}`\n\n"
+                f"⚠️ *Catatan: Firmware bootloader telah ditulis ke flash BIOS. Lakukan reboot router (`/system reboot`) agar firmware baru aktif sepenuhnya.*"
+            ),
+            data={
+                "status": "FIRMWARE_UPGRADED",
+                "current_firmware": upg,
+                "previous_firmware": curr,
+                "model": self._routerboard.get("model"),
+                "device": self.device_name,
+            },
+            device=self.device_name,
+            latency_ms=8.0,
+        )
+
+    def get_firmware_status(self, channel: str = "stable") -> OperationResult:
+        if channel:
+            self._package_update["channel"] = channel
+        has_os_update = self._package_update["installed_version"] != self._package_update["latest_version"]
+        has_rb_update = self._routerboard.get("current_firmware") != self._routerboard.get("upgrade_firmware")
+
+        rb_data = dict(self._routerboard)
+        # Mirror both hyphen and underscore formats for hardware parity
+        for k, v in list(rb_data.items()):
+            if "_" in k:
+                rb_data[k.replace("_", "-")] = v
+            elif "-" in k:
+                rb_data[k.replace("-", "_")] = v
+
+        combined = {
+            "routerboard": rb_data,
+            "package_update": dict(self._package_update),
+            "has_os_update": has_os_update,
+            "has_rb_update": has_rb_update,
+        }
+        return OperationResult(
+            success=True,
+            message="Informasi status firmware dan update RouterOS berhasil diambil.",
+            data=combined,
+            device=self.device_name,
+            latency_ms=3.0,
         )

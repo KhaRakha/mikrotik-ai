@@ -24,14 +24,18 @@ from bot.handlers import (
     devices_command,
     discover_command,
     edit_ip_command,
+    firmware_command,
     handle_callback_query,
     handle_message,
     help_command,
+    reload_command,
     remove_device_command,
     remove_ip_command,
+    reboot_command,
     role_command,
     start_command,
     status_command,
+    upgrade_command,
 )
 from config.settings import settings
 from core.monitor import proactive_monitor
@@ -63,10 +67,16 @@ def create_bot_app() -> Application:
     app.add_handler(CommandHandler("devices", devices_command))
     app.add_handler(CommandHandler("add_device", add_device_command))
     app.add_handler(CommandHandler("remove_device", remove_device_command))
+    app.add_handler(CommandHandler("reload", reload_command))
     app.add_handler(CommandHandler("add_ip", add_ip_command))
     app.add_handler(CommandHandler("remove_ip", remove_ip_command))
     app.add_handler(CommandHandler("edit_ip", edit_ip_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("firmware", firmware_command))
+    app.add_handler(CommandHandler("check_update", firmware_command))
+    app.add_handler(CommandHandler("upgrade", upgrade_command))
+    app.add_handler(CommandHandler("reboot", reboot_command))
+    app.add_handler(CommandHandler("restart", reboot_command))
     app.add_handler(CommandHandler("audit", audit_command))
     app.add_handler(CommandHandler("discover", discover_command))
     app.add_handler(CommandHandler("role", role_command))

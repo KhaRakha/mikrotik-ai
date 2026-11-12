@@ -83,6 +83,8 @@ class HermesAIAgent:
     @staticmethod
     def _get_simulation_notice(device_name: str) -> str:
         """Returns offline mock simulation warning if router client is running in fallback mock mode."""
+        if not device_name or device_name in ("Sistem Inventaris", "Unknown"):
+            return ""
         client = device_manager.get_client(device_name)
         if getattr(client, "is_fallback_mock", False):
             real_name = getattr(client, "real_device_name", device_name)
@@ -181,8 +183,13 @@ class HermesAIAgent:
             return {"reply": dang_warning, "action_required": False, "pending_action": None}
 
         # 3. Resolve Target Device from User Utterance
-        target_device = settings.find_device(text_clean)
-        device_name = target_device.name if target_device else settings.default_device_name
+        is_device_reg = any(w in lower_input for w in ("daftarkan router", "daftar router", "tambah router", "tambahkan router", "tambah perangkat", "daftarkan perangkat", "add device", "register router"))
+        if is_device_reg:
+            target_device = None
+            device_name = "Sistem Inventaris"
+        else:
+            target_device = settings.find_device(text_clean)
+            device_name = target_device.name if target_device else settings.default_device_name
 
         # 3.5 Check for Pure Greeting / Casual Ping (Instant Personalized Response mentioning user)
         clean_no_punct = re.sub(r"[^\w\s]", " ", text_clean.lower()).strip()
@@ -246,7 +253,10 @@ class HermesAIAgent:
             pending_act = reply_dict.get("pending_action")
 
         # Prepend simulation notice if target device is running in mock fallback mode
-        sim_notice = self._get_simulation_notice(device_name)
+        if pending_act and pending_act.action_name == "register_device":
+            sim_notice = ""
+        else:
+            sim_notice = self._get_simulation_notice(device_name)
         if (
             sim_notice
             and not reply_content.startswith("⚠️ **[MODE SIMULASI OFFLINE]")
@@ -280,6 +290,229 @@ class HermesAIAgent:
             "action_required": pending_act is not None,
             "pending_action": pending_act,
         }
+
+    def _create_write_confirmation(
+        self,
+        user_id: int,
+        fn_name: str,
+        args: Dict[str, Any],
+        device_name: str,
+    ) -> Dict[str, Any]:
+        """Creates standard confirmation card for write operations, ensuring consistency between LLM and Heuristics."""
+        if not security_manager.can_user_write(user_id):
+            return {
+                "reply": "⛔ **Akses Terbatas**: Akun Anda memiliki role **Viewer (Read-Only)**. Operasi perubahan konfigurasi hanya dapat diajukan oleh Administrator.",
+                "pending_action": None,
+            }
+
+        if fn_name == "register_device":
+            dev_name = args.get("name", "Router_Baru")
+            dev_ip = args.get("host", "")
+            dev_port = args.get("port") or 8728
+            dev_proto = args.get("protocol", "api")
+            dev_user = args.get("username", "admin")
+            dev_pass = args.get("password", "")
+            desc = f"Pendaftaran router '{dev_name}' ({dev_ip}:{dev_port})"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=dev_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"⚠️ **Konfirmasi Pendaftaran Router Baru**\n\n"
+                f"• Nama Router : **{dev_name}**\n"
+                f"• Host/IP     : `{dev_ip}` (Port `{dev_port}`)\n"
+                f"• Protokol    : `{dev_proto.upper()}`\n"
+                f"• Username    : `{dev_user}`\n"
+                f"• Password    : `{'*' * len(dev_pass) if dev_pass else '(Kosong)'}`\n\n"
+                f"Daftarkan router ini ke sistem dan aktifkan pemantauan otomatis?\n"
+                f"👉 Balas **Ya** atau tekan tombol [ YA ] di bawah."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        if fn_name == "remove_device":
+            target_name = args.get("name") or device_name
+            desc = f"Penghapusan router '{target_name}'"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=target_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"⚠️ **Konfirmasi Penghapusan Router**\n\n"
+                f"Target : **{target_name}**\n\n"
+                f"Apakah Anda yakin ingin menghapus router ini dari inventaris pemantauan?\n"
+                f"👉 Balas **Ya** atau tekan tombol [ YA ] di bawah."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        if fn_name == "add_ip_address":
+            target_ip = args.get("address", "")
+            target_iface = args.get("interface", "")
+            target_comment = args.get("comment", "")
+            desc = f"Penambahan IP '{target_ip}' pada interface '{target_iface}'"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=device_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"⚠️ **Konfirmasi Penambahan IP Address**\n\n"
+                f"• Target Router : **{device_name}**\n"
+                f"• Alamat IP     : `{target_ip}`\n"
+                f"• Interface     : `{target_iface}`\n"
+                f"• Komentar      : `{target_comment or '-'}`\n\n"
+                f"Lanjutkan penambahan IP address ke router?\n"
+                f"👉 Balas **Ya** atau tekan tombol [ YA ] di bawah."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        if fn_name == "set_ip_address":
+            curr_ip = args.get("current_address") or args.get("address_or_id") or args.get("address", "")
+            new_ip = args.get("new_address") or args.get("address", "")
+            desc = f"Pengubahan IP '{curr_ip}' menjadi '{new_ip}'"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=device_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"⚠️ **Konfirmasi Pengubahan IP Address**\n\n"
+                f"• Target Router : **{device_name}**\n"
+                f"• IP Sekarang   : `{curr_ip}`\n"
+                f"• IP Baru       : `{new_ip}`\n\n"
+                f"Lanjutkan perubahan alamat IP pada router?\n"
+                f"👉 Balas **Ya** atau tekan tombol [ YA ] di bawah."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        if fn_name == "remove_ip_address":
+            target_ip = args.get("address") or args.get("address_or_id", "")
+            desc = f"Penghapusan IP '{target_ip}'"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=device_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"⚠️ **Konfirmasi Penghapusan IP Address**\n\n"
+                f"• Target Router : **{device_name}**\n"
+                f"• Alamat IP     : `{target_ip}`\n\n"
+                f"Lanjutkan penghapusan IP address ini?\n"
+                f"👉 Balas **Ya** atau tekan tombol [ YA ] di bawah."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        if fn_name == "install_router_update":
+            channel = args.get("channel", "stable")
+            fw_res = TOOL_REGISTRY["get_firmware_status"](device=device_name, channel=channel)
+            fw_data = fw_res.get("data") or {}
+            pkg_info = fw_data.get("package_update") or {}
+            rb_info = fw_data.get("routerboard") or {}
+
+            curr = pkg_info.get("installed_version") or pkg_info.get("installed-version") or rb_info.get("current_firmware") or rb_info.get("current-firmware", "-")
+            target = args.get("target_version") or pkg_info.get("latest_version") or pkg_info.get("latest-version") or "-"
+            desc = f"Upgrade RouterOS {device_name} ({curr} -> {target})"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=device_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"🚨 **Konfirmasi Diperlukan: UPGRADE ROUTEROS**\n\n"
+                f"• Target Router   : **{device_name}**\n"
+                f"• Aksi            : `install_router_update`\n"
+                f"• Versi Saat Ini  : `v{curr}`\n"
+                f"• Versi Target    : `v{target}` (Channel: `{channel}`)\n\n"
+                f"⚠️ **PERINGATAN KESELAMATAN JARINGAN**:\n"
+                f"1. Router akan mengunduh paket update dan melakukan **REBOOT otomatis**.\n"
+                f"2. Jaringan/Internet akan offline sementara selama **1-3 menit**.\n"
+                f"3. Pastikan pasokan listrik router stabil selama proses penulisan firmware!\n\n"
+                f"Apakah Anda yakin ingin memulai proses upgrade firmware sekarang?\n"
+                f"👉 Balas **Ya** atau klik tombol [ YA ] di bawah untuk mengeksekusi, atau **Batal** untuk membatalkan."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        if fn_name == "upgrade_routerboard_firmware":
+            fw_res = TOOL_REGISTRY["get_firmware_status"](device=device_name)
+            fw_data = fw_res.get("data") or {}
+            rb_info = fw_data.get("routerboard") or {}
+
+            curr = rb_info.get("current_firmware") or rb_info.get("current-firmware", "-")
+            target = rb_info.get("upgrade_firmware") or rb_info.get("upgrade-firmware", "-")
+            model = rb_info.get("model", "-")
+            desc = f"Upgrade firmware bootloader RouterBOARD {device_name} ({curr} -> {target})"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=device_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"⚡ **Konfirmasi Diperlukan: UPGRADE BOOTLOADER BIOS**\n\n"
+                f"• Target Router    : **{device_name}**\n"
+                f"• Model Board      : `{model}`\n"
+                f"• Firmware Aktif   : `v{curr}`\n"
+                f"• Firmware Baru    : `v{target}`\n\n"
+                f"⚠️ **INFORMASI PENTING**:\n"
+                f"Firmware bootloader BIOS akan diperbarui. Setelah proses ini, router perlu direboot agar firmware baru aktif di perangkat keras.\n\n"
+                f"Lanjutkan upgrade bootloader BIOS sekarang?\n"
+                f"👉 Balas **Ya** atau klik tombol [ YA ] di bawah."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        if fn_name == "system_reboot":
+            desc = f"Reboot router {device_name}"
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=device_name,
+                action_name=fn_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_msg = (
+                f"🚨 **Konfirmasi Diperlukan: REBOOT ROUTER**\n\n"
+                f"Target    : **{device_name}**\n"
+                f"Aksi      : `system_reboot`\n\n"
+                f"⚠️ **PERINGATAN RISIKO**:\n"
+                f"• Router akan memutus seluruh koneksi jaringan dan memulai ulang sistem.\n"
+                f"• Sistem akan offline selama 30-60 detik.\n\n"
+                f"Apakah Anda benar-benar yakin ingin me-reboot router sekarang?\n"
+                f"👉 Balas **Ya** atau klik tombol [ YA ] di bawah untuk menyetujui, atau **Batal** untuk membatalkan."
+            )
+            return {"reply": confirm_msg, "pending_action": pending}
+
+        # Generic Write fallback
+        desc = f"Operasi '{fn_name}' pada router {device_name}"
+        pending = confirmation_manager.create_pending_action(
+            user_id=user_id,
+            device_name=device_name,
+            action_name=fn_name,
+            arguments=args,
+            description=desc,
+        )
+        confirm_msg = (
+            f"⚠️ **Konfirmasi Diperlukan**\n\n"
+            f"Target    : **{device_name}**\n"
+            f"Aksi      : `{fn_name}`\n"
+            f"Parameter : `{json.dumps(args, ensure_ascii=False)}`\n\n"
+            f"Apakah Anda yakin ingin melanjutkan konfigurasi ini?\n"
+            f"Ketik **Ya** atau klik tombol di bawah untuk setuju, atau **Batal** untuk membatalkan."
+        )
+        return {"reply": confirm_msg, "pending_action": pending}
 
     def _run_llm_cycle(self, user_id: int, username: str, prompt: str, device_name: str) -> Dict[str, Any]:
         """Execute Tool Calling cycle with LLM."""
@@ -378,34 +611,16 @@ class HermesAIAgent:
                         for call in tool_calls:
                             fn_name = call.get("name")
                             args = call.get("args", {})
-                            if "device" not in args or not args["device"]:
-                                args["device"] = device_name
+                            if fn_name not in ("register_device", "remove_device", "discover_devices", "ping_host", "check_server_port"):
+                                if "device" not in args or not args["device"]:
+                                    args["device"] = device_name
+                            else:
+                                args.pop("device", None)
 
                             # Check write permission
                             perm = security_manager.classify_permission(fn_name)
                             if perm == "WRITE":
-                                if not security_manager.can_user_write(user_id):
-                                    return {
-                                        "reply": "⛔ **Akses Terbatas**: Akun Anda memiliki role **Viewer (Read-Only)**. Operasi perubahan konfigurasi hanya dapat diajukan oleh Administrator.",
-                                        "pending_action": None,
-                                    }
-                                desc = f"Operasi '{fn_name}' pada router {device_name}"
-                                pending_action = confirmation_manager.create_pending_action(
-                                    user_id=user_id,
-                                    device_name=device_name,
-                                    action_name=fn_name,
-                                    arguments=args,
-                                    description=desc,
-                                )
-                                confirm_msg = (
-                                    f"⚠️ **Konfirmasi Diperlukan**\n\n"
-                                    f"Target    : **{device_name}**\n"
-                                    f"Aksi      : `{fn_name}`\n"
-                                    f"Parameter : `{json.dumps(args, ensure_ascii=False)}`\n\n"
-                                    f"Apakah Anda yakin ingin melanjutkan konfigurasi ini?\n"
-                                    f"Ketik **Ya** atau klik tombol di bawah untuk setuju, atau **Batal** untuk membatalkan."
-                                )
-                                return {"reply": confirm_msg, "pending_action": pending_action}
+                                return self._create_write_confirmation(user_id, fn_name, args, device_name)
 
                             # READ operation
                             func = TOOL_REGISTRY.get(fn_name)
@@ -486,33 +701,15 @@ class HermesAIAgent:
                 for tc in tool_calls:
                     fn_name = tc["function"]["name"]
                     args = json.loads(tc["function"]["arguments"] or "{}")
-                    if "device" not in args or not args["device"]:
-                        args["device"] = device_name
+                    if fn_name not in ("register_device", "remove_device", "discover_devices", "ping_host", "check_server_port"):
+                        if "device" not in args or not args["device"]:
+                            args["device"] = device_name
+                    else:
+                        args.pop("device", None)
 
                     perm = security_manager.classify_permission(fn_name)
                     if perm == "WRITE":
-                        if not security_manager.can_user_write(user_id):
-                            return {
-                                "reply": "⛔ **Akses Terbatas**: Akun Anda memiliki role **Viewer (Read-Only)**. Operasi perubahan konfigurasi hanya dapat diajukan oleh Administrator.",
-                                "pending_action": None,
-                            }
-                        desc = f"Operasi '{fn_name}' pada {device_name}"
-                        pending = confirmation_manager.create_pending_action(
-                            user_id=user_id,
-                            device_name=device_name,
-                            action_name=fn_name,
-                            arguments=args,
-                            description=desc,
-                        )
-                        confirm_msg = (
-                            f"⚠️ **Konfirmasi Diperlukan**\n\n"
-                            f"Target    : **{device_name}**\n"
-                            f"Aksi      : `{fn_name}`\n"
-                            f"Parameter : `{json.dumps(args, ensure_ascii=False)}`\n\n"
-                            f"Apakah Anda yakin ingin melanjutkan konfigurasi ini?\n"
-                            f"Ketik **Ya** atau klik tombol di bawah untuk setuju, atau **Batal** untuk membatalkan."
-                        )
-                        return {"reply": confirm_msg, "pending_action": pending}
+                        return self._create_write_confirmation(user_id, fn_name, args, device_name)
 
                     func = TOOL_REGISTRY.get(fn_name)
                     res = func(**args) if func else {"error": "Tool not found"}
@@ -548,10 +745,10 @@ class HermesAIAgent:
             ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', prompt)
             dev_ip = ip_match.group(0) if ip_match else ""
 
-            name_match = re.search(r'(?:bernama|nama)\s+([a-zA-Z0-9_-]+)', prompt, re.IGNORECASE)
+            name_match = re.search(r'(?:bernama|nama)\s+([a-zA-Z0-9_\s-]+?)(?:\s+(?:ip|port|host|username|user)\b|$)', prompt, re.IGNORECASE)
             if not name_match:
-                name_match = re.search(r'(?:router baru)\s+([a-zA-Z0-9_-]+)', prompt, re.IGNORECASE)
-            dev_name = name_match.group(1) if name_match else ""
+                name_match = re.search(r'(?:router baru)\s+([a-zA-Z0-9_\s-]+?)(?:\s+(?:ip|port|host|username|user)\b|$)', prompt, re.IGNORECASE)
+            dev_name = name_match.group(1).strip() if name_match else ""
             if not dev_name or dev_name.lower() in ("baru", "mikrotik", "ip", "dengan"):
                 dev_name = f"Router_{dev_ip.replace('.', '_')}" if dev_ip else "Router_Baru"
 
@@ -1012,6 +1209,70 @@ class HermesAIAgent:
                 f"• Perangkat memerlukan intervensi fisik untuk dinyalakan kembali.\n\n"
                 f"Lanjutkan mematikan router?\n"
                 f"👉 Balas **Ya** untuk setuju atau **Batal** untuk membatalkan."
+            )
+            return {"reply": confirm_card, "pending_action": pending}
+
+        # Firmware Upgrade / RouterOS Update (PRD Scenario Admin Write Action)
+        has_upgrade_kw = any(w in lower for w in (
+            "upgrade firmware", "update firmware", "upgrade frimware", "update frimware",
+            "upgrade fremware", "update fremware", "upgrade routeros", "update routeros",
+            "upgrade router", "update router ke versi terbaru", "install update router",
+            "upgrade bootloader", "upgrade routerboard", "upgrade bios", "perbarui firmware",
+            "perbarui frimware", "update bootloader", "perbarui bootloader",
+        )) or (
+            any(w in lower for w in ("upgrade", "update", "perbarui", "upgread", "apdet", "install"))
+            and any(w in lower for w in ("firmware", "frimware", "fremware", "bootloader", "bios", "routerboard", "routeros"))
+        )
+        is_query_check = any(w in lower for w in ("cek", "apakah", "info", "status", "lihat", "kapan", "bisa", "bagaimana", "cara"))
+
+        if has_upgrade_kw and not is_query_check:
+            if not security_manager.can_user_write(user_id):
+                return {
+                    "reply": "⛔ **Akses Terbatas**: Akun Anda memiliki role **Viewer (Read-Only)**. Operasi upgrade firmware hanya dapat diajukan oleh Administrator.",
+                    "action_required": False,
+                    "pending_action": None,
+                }
+
+            fw_res = TOOL_REGISTRY["get_firmware_status"](device=device_name)
+            fw_data = fw_res.get("data") or {}
+            pkg_info = fw_data.get("package_update") or {}
+            rb_info = fw_data.get("routerboard") or {}
+
+            is_bootloader_only = any(w in lower for w in ("bootloader", "routerboard", "bios"))
+            if is_bootloader_only and not any(w in lower for w in ("routeros", "os")):
+                action_name = "upgrade_routerboard_firmware"
+                curr = rb_info.get("current_firmware") or rb_info.get("current-firmware", "-")
+                target = rb_info.get("upgrade_firmware") or rb_info.get("upgrade-firmware", "-")
+                desc = f"Upgrade firmware bootloader RouterBOARD {device_name} ({curr} -> {target})"
+                action_desc = "Upgrade Bootloader Firmware RouterBOARD"
+            else:
+                action_name = "install_router_update"
+                curr = pkg_info.get("installed_version") or pkg_info.get("installed-version") or rb_info.get("current_firmware") or rb_info.get("current-firmware", "-")
+                has_os_upd = fw_data.get("has_os_update", False)
+                target = pkg_info.get("latest_version") or pkg_info.get("latest-version") or (curr if not has_os_upd else "-")
+                desc = f"Upgrade RouterOS {device_name} ({curr} -> {target})"
+                action_desc = "Upgrade Paket RouterOS & Firmware"
+
+            args = {"device": device_name, "channel": pkg_info.get("channel", "stable"), "target_version": target}
+            pending = confirmation_manager.create_pending_action(
+                user_id=user_id,
+                device_name=device_name,
+                action_name=action_name,
+                arguments=args,
+                description=desc,
+            )
+            confirm_card = (
+                f"🚨 **Konfirmasi Diperlukan: {action_desc.upper()}**\n\n"
+                f"• Target Router   : **{device_name}**\n"
+                f"• Aksi            : `{action_name}`\n"
+                f"• Versi Saat Ini  : `v{curr}`\n"
+                f"• Versi Target    : `v{target}` (Channel: `{pkg_info.get('channel', 'stable')}`)\n\n"
+                f"⚠️ **PERINGATAN KESELAMATAN JARINGAN**:\n"
+                f"1. Router akan mengunduh paket pembaruan dan melakukan **REBOOT otomatis**.\n"
+                f"2. Seluruh koneksi jaringan & internet akan offline sementara selama **1-3 menit**.\n"
+                f"3. Pastikan pasokan listrik router stabil selama proses penulisan firmware flash memory!\n\n"
+                f"Apakah Anda yakin ingin memulai proses upgrade firmware sekarang?\n"
+                f"👉 Balas **Ya** atau klik tombol [ YA ] di bawah untuk mengeksekusi, atau **Batal** untuk membatalkan."
             )
             return {"reply": confirm_card, "pending_action": pending}
 
@@ -1642,6 +1903,77 @@ class HermesAIAgent:
                 lines.append(f"• **{p.get('name')}** v`{p.get('version')}` ({p.get('bundle')}) - {st}")
             if not pkgs:
                 lines.append("  _(Tidak ada paket tambahan yang terpasang)_")
+            return {"reply": "\n".join(lines), "pending_action": None}
+
+        # 11.5 Firmware Status & RouterOS Update (Get)
+        if any(w in lower for w in (
+            "cek firmware", "cek frimware", "status firmware", "status frimware", "update firmware",
+            "cek update", "apakah ada update", "versi terbaru", "update routeros", "info firmware",
+            "info frimware", "cek versi mikrotik", "firmware status", "frimware status",
+            "cek upgrade", "update apa", "ada update", "bisa update", "bisa upgrade", "bisa mengupdate",
+            "cara update", "cara upgrade", "apdet router",
+        )) or ((any(w in lower for w in ("firmware", "frimware", "fremware", "routeros", "bios router", "upgrade", "bootloader")) and any(w in lower for w in ("cek", "lihat", "status", "info", "ada", "tersedia", "apakah", "bisa", "bagaimana", "cara")))):
+            res = TOOL_REGISTRY["get_firmware_status"](device=device_name)
+            data = res.get("data") or {}
+            rb = data.get("routerboard") or {}
+            pkg = data.get("package_update") or {}
+
+            curr_fw = rb.get("current_firmware") or rb.get("current-firmware") or "-"
+            upg_fw = rb.get("upgrade_firmware") or rb.get("upgrade-firmware") or "-"
+            installed = pkg.get("installed_version") or pkg.get("installed-version") or curr_fw
+            has_os_update = data.get("has_os_update", False)
+            has_rb_update = data.get("has_rb_update", False)
+            latest = pkg.get("latest_version") or pkg.get("latest-version") or (installed if not has_os_update else "-")
+            channel = pkg.get("channel", "stable")
+            status_text = pkg.get("status", "-")
+
+            status_badge = "🚀 **UPDATE TERSEDIA!**" if has_os_update else "✅ **Sistem Up to Date (Terbaru)**"
+
+            model = rb.get("model") or "-"
+            board_name = rb.get("board_name") or rb.get("board-name") or ""
+            model_str = f"**{model}** ({board_name})" if board_name else f"**{model}**"
+            serial = rb.get("serial_number") or rb.get("serial-number") or "-"
+
+            is_hardware = rb.get("routerboard") not in ("no", False, "false")
+
+            lines = [
+                f"🛰️ **Status Firmware & Pembaruan Sistem ({device_name})**\n",
+                f"• Status Rilis      : {status_badge}",
+                f"• Channel Update    : `{channel}`",
+                f"• RouterOS Aktif    : `v{installed}`",
+                f"• Versi Terbaru     : `v{latest}`",
+                f"• Keterangan Server : _{status_text}_\n",
+            ]
+
+            if is_hardware and model != "-":
+                lines.extend([
+                    f"🔧 **Hardware & Bootloader BIOS:**",
+                    f"• Model Board       : {model_str}",
+                    f"• Serial Number     : `{serial}`",
+                    f"• Bootloader Aktif  : `v{curr_fw}`",
+                    f"• Bootloader Upgrade: `v{upg_fw}`\n",
+                ])
+            else:
+                lines.extend([
+                    f"🔧 **Hardware & Bootloader BIOS:**",
+                    f"• Tipe Sistem       : _Virtual / Cloud Hosted Router (CHR / x86)_\n",
+                ])
+
+            if has_os_update:
+                lines.append(
+                    "💡 **Tindakan yang Disarankan:**\n"
+                    f"Ketik: 👉 *\"Upgrade firmware {device_name}\"*\n"
+                    "Atau gunakan perintah: `/upgrade` untuk memperbarui sistem secara otomatis."
+                )
+            elif has_rb_update:
+                lines.append(
+                    "💡 **Tindakan yang Disarankan:**\n"
+                    "Firmware bootloader baru tersedia untuk hardware ini.\n"
+                    f"Ketik: 👉 *\"Upgrade bootloader {device_name}\"* untuk memperbarui BIOS router."
+                )
+            else:
+                lines.append("✨ Perangkat Anda telah menggunakan versi firmware dan sistem operasi paling mutakhir dan stabil.")
+
             return {"reply": "\n".join(lines), "pending_action": None}
 
         # 12. RouterBOARD Info (Get)

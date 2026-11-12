@@ -199,6 +199,8 @@ def register_device(
     username: str = "admin",
     password: str = "",
     description: str = "",
+    device: str = "",
+    **kwargs: Any,
 ) -> Dict[str, Any]:
     """[WRITE / INVENTORY] Mendaftarkan router MikroTik baru ke inventaris perangkat sistem."""
     if not name or not host:
@@ -214,11 +216,12 @@ def register_device(
     )
 
 
-def remove_device(name: str = "") -> Dict[str, Any]:
+def remove_device(name: str = "", device: str = "", **kwargs: Any) -> Dict[str, Any]:
     """[WRITE / INVENTORY] Menghapus router MikroTik dari inventaris perangkat sistem."""
-    if not name:
+    target = name or device
+    if not target:
         return {"success": False, "message": "Parameter nama atau ID router wajib diisi."}
-    return device_discovery.remove_device(name_or_id=name)
+    return device_discovery.remove_device(name_or_id=target)
 
 
 def check_server_port(host: str, port: int, timeout: float = 3.0) -> Dict[str, Any]:
@@ -416,6 +419,30 @@ def system_shutdown(device: str = "") -> Dict[str, Any]:
     return client.shutdown().to_dict()
 
 
+def check_router_update(device: str = "", channel: str = "stable") -> Dict[str, Any]:
+    """Mengecek ketersediaan pembaruan RouterOS dan membandingkan versi yang terpasang dengan versi terbaru."""
+    client = device_manager.get_client(device)
+    return client.check_router_update(channel=channel).to_dict()
+
+
+def install_router_update(device: str = "", channel: str = "stable") -> Dict[str, Any]:
+    """[WRITE / ADMIN ONLY] Mengunduh dan menginstal pembaruan paket RouterOS (otomatis reboot perangkat)."""
+    client = device_manager.get_client(device)
+    return client.install_router_update(channel=channel).to_dict()
+
+
+def upgrade_routerboard_firmware(device: str = "") -> Dict[str, Any]:
+    """[WRITE / ADMIN ONLY] Meng-upgrade firmware bootloader BIOS RouterBOARD ke versi terbaru yang didukung."""
+    client = device_manager.get_client(device)
+    return client.upgrade_routerboard_firmware().to_dict()
+
+
+def get_firmware_status(device: str = "", channel: str = "stable") -> Dict[str, Any]:
+    """Melihat status lengkap firmware RouterBOARD dan ketersediaan update paket RouterOS."""
+    client = device_manager.get_client(device)
+    return client.get_firmware_status(channel=channel).to_dict()
+
+
 # Map function names to Python callables
 TOOL_REGISTRY: Dict[str, Any] = {
     "connect_mikrotik": connect_mikrotik,
@@ -466,6 +493,11 @@ TOOL_REGISTRY: Dict[str, Any] = {
     "set_clock_timezone": set_clock_timezone,
     "system_reboot": system_reboot,
     "system_shutdown": system_shutdown,
+    # Firmware & Update Menu
+    "check_router_update": check_router_update,
+    "install_router_update": install_router_update,
+    "upgrade_routerboard_firmware": upgrade_routerboard_firmware,
+    "get_firmware_status": get_firmware_status,
 }
 
 # OpenAI / Gemini tool function definitions schema
@@ -1143,6 +1175,64 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "device": {"type": "string", "description": "Nama router"}
+                },
+            },
+        },
+    },
+    # =========================================================================
+    # FIRMWARE & UPGRADE SCHEMAS
+    # =========================================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "check_router_update",
+            "description": "Mengecek ketersediaan update RouterOS dari server MikroTik untuk melihat apakah ada versi baru",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string", "description": "Nama router target"},
+                    "channel": {"type": "string", "description": "Channel rilis RouterOS ('stable', 'long-term', 'testing')", "default": "stable"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "install_router_update",
+            "description": "[WRITE / ADMIN ONLY] Mengunduh dan menginstal update RouterOS dan memulai proses reboot otomatis",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string", "description": "Nama router target"},
+                    "channel": {"type": "string", "description": "Channel rilis RouterOS ('stable', 'long-term', 'testing')", "default": "stable"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "upgrade_routerboard_firmware",
+            "description": "[WRITE / ADMIN ONLY] Meng-upgrade firmware bootloader (BIOS) RouterBOARD router MikroTik",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string", "description": "Nama router target"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_firmware_status",
+            "description": "Melihat status komprehensif versi RouterOS saat ini, update terbaru, serta versi firmware bootloader RouterBOARD",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string", "description": "Nama router target"},
+                    "channel": {"type": "string", "description": "Kanal rilis pembaruan (misal: 'stable', 'long-term', 'testing')", "default": "stable"}
                 },
             },
         },

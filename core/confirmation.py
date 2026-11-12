@@ -5,12 +5,15 @@ Manages pending configuration actions, timeouts, approval tokens, and execution 
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 from config.settings import settings
 from mikrotik.base import OperationResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -112,15 +115,33 @@ class ConfirmationManager:
                 tool_func = TOOL_REGISTRY.get(action.action_name)
                 if not tool_func:
                     return OperationResult(success=False, message=f"Tool '{action.action_name}' tidak ditemukan.")
-                raw_res = tool_func(**action.arguments)
-                msg = raw_res.get("message") or (f"✅ Aksi '{action.action_name}' berhasil dieksekusi." if raw_res.get("success") else f"❌ Gagal: {raw_res.get('error', 'Terjadi kesalahan.')}")
-                result = OperationResult(
-                    success=raw_res.get("success", False),
-                    message=msg,
-                    data=raw_res.get("data"),
-                    error=raw_res.get("error"),
-                    device=action.device_name,
-                )
+                
+                import inspect
+                sig = inspect.signature(tool_func)
+                has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+                if has_kwargs:
+                    exec_args = action.arguments
+                else:
+                    exec_args = {k: v for k, v in action.arguments.items() if k in sig.parameters}
+
+                try:
+                    raw_res = tool_func(**exec_args)
+                    msg = raw_res.get("message") or (f"✅ Aksi '{action.action_name}' berhasil dieksekusi." if raw_res.get("success") else f"❌ Gagal: {raw_res.get('error', 'Terjadi kesalahan.')}")
+                    result = OperationResult(
+                        success=raw_res.get("success", False),
+                        message=msg,
+                        data=raw_res.get("data"),
+                        error=raw_res.get("error"),
+                        device=action.device_name,
+                    )
+                except Exception as ex:
+                    logger.exception("Error executing action '%s': %s", action.action_name, ex)
+                    result = OperationResult(
+                        success=False,
+                        message=f"❌ Gagal mengeksekusi '{action.action_name}': {str(ex)}",
+                        error=str(ex),
+                        device=action.device_name,
+                    )
             return result
         finally:
             self.cancel_action(token)

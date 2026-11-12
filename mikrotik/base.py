@@ -289,3 +289,23 @@ class BaseMikrotikClient(ABC):
     def shutdown(self) -> OperationResult:
         """Shutdown router."""
         return self.execute_raw_command("system", "shutdown")
+
+    def check_router_update(self, channel: str = "stable") -> OperationResult:
+        """Check for RouterOS software updates from MikroTik servers."""
+        return self.execute_raw_command("system/package/update", f"check-for-updates once")
+
+    def install_router_update(self, channel: str = "stable") -> OperationResult:
+        """Download and install RouterOS update packages, initiating an automatic reboot."""
+        return self.execute_raw_command("system/package/update", "install")
+
+    def upgrade_routerboard_firmware(self) -> OperationResult:
+        """Upgrade RouterBOARD bootloader (BIOS) firmware to match RouterOS version."""
+        return self.execute_raw_command("system/routerboard", "upgrade")
+
+    def get_firmware_status(self, channel: str = "stable") -> OperationResult:
+        """Retrieve combined RouterOS update status and RouterBOARD hardware firmware information."""
+        return OperationResult(
+            success=False,
+            message="get_firmware_status belum didukung secara bawaan untuk protokol ini.",
+            device=self.device_name,
+        )

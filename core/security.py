@@ -84,14 +84,14 @@ class SecurityManager:
             if m:
                 kw = m.group(0)
                 warning_msg = (
-                    "⚠️ **OPERASI BERISIKO TINGGI DITOLAK**\n\n"
+                    "⚠️ OPERASI BERISIKO TINGGI DITOLAK\n\n"
                     "Operasi ini terdeteksi sebagai tindakan berbahaya (Reset / Factory Reset / Format / Wipe):\n"
                     f"• Pola terdeteksi: `{kw}`\n\n"
                     "Dampak risiko:\n"
                     "- Seluruh konfigurasi router dapat hilang permanen\n"
                     "- Koneksi jaringan terputus total\n"
                     "- Akses manajemen router terisolasi\n\n"
-                    "Operasi ini **TIDAK TERSEDIA** melalui Telegram Bot demi keamanan.\n"
+                    "Operasi ini TIDAK TERSEDIA melalui AI Bot / Telegram Bot demi keamanan.\n"
                     "Silakan lakukan secara manual melalui Winbox atau konsol fisik router."
                 )
                 return True, warning_msg
@@ -102,9 +102,10 @@ class SecurityManager:
             if m:
                 kw = m.group(0)
                 warning_msg = (
-                    "⚠️ **OPERASI RESET ROUTER DITOLAK**\n\n"
+                    "⚠️ OPERASI BERISIKO TINGGI - RESET ROUTER DITOLAK\n\n"
                     f"Perintah terdeteksi: `{kw}`\n"
                     "Reset konfigurasi MikroTik tidak diizinkan melalui Telegram Bot untuk mencegah kehilangan konfigurasi jaringan.\n"
+                    "Operasi ini **TIDAK TERSEDIA** melalui AI Bot / Telegram Bot demi keamanan.\n"
                     "Gunakan Winbox atau Netinstall jika benar-benar ingin mereset router secara langsung."
                 )
                 return True, warning_msg
@@ -118,8 +119,24 @@ class SecurityManager:
                 return False, ""
             else:
                 return True, (
-                    "⛔ **Akses Terbatas**: Akun Anda memiliki role **Viewer (Read-Only)**.\n"
+                    "⚠️ OPERASI BERISIKO TINGGI: ⛔ **Akses Terbatas**\n"
+                    "Akun Anda memiliki role **Viewer (Read-Only)**.\n"
                     "Perintah reboot atau shutdown router hanya dapat diajukan oleh Administrator."
+                )
+
+        # Firmware Upgrade / RouterOS Update:
+        # If Admin: permitted to proceed to 2-Phase confirmation
+        # If Viewer: blocked if it's an imperative command to upgrade
+        is_upgrade_cmd = bool(re.search(r"\b(upgrade|update|perbarui|install)\s+(firmware|frimware|fremware|routeros|router|bootloader|bios|routerboard)\b", lower))
+        is_check_query = any(w in lower for w in ("cek", "status", "info", "lihat", "apakah", "kapan", "ada"))
+        if is_upgrade_cmd and not is_check_query:
+            if is_admin:
+                return False, ""
+            else:
+                return True, (
+                    "⚠️ OPERASI BERISIKO TINGGI: ⛔ **Akses Terbatas**\n"
+                    "Akun Anda memiliki role **Viewer (Read-Only)**.\n"
+                    "Perintah upgrade firmware atau update RouterOS hanya dapat diajukan oleh Administrator."
                 )
 
         return False, ""
@@ -147,6 +164,8 @@ class SecurityManager:
             "send_router_email",
             "add_netwatch",
             "add_traffic_monitor",
+            "install_router_update",
+            "upgrade_routerboard_firmware",
         ]
         for w in built_in_writes:
             if w.lower() in action_clean:

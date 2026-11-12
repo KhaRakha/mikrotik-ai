@@ -210,10 +210,43 @@ class Settings:
     def find_device(self, query: str, fallback: bool = True) -> Optional[DeviceConfig]:
         if not query:
             return self.get_default_device() if fallback else None
+
+        clean_query = query.lower().strip()
+
+        # Phase 1: Exact match (id, name, host, or exact alias)
         for dev in self.devices:
-            if dev.matches(query):
+            if clean_query in (dev.id.lower(), dev.name.lower(), dev.host.lower()):
                 return dev
+            if any(clean_query == a.lower() for a in dev.aliases if a):
+                return dev
+
+        # Phase 2: Longest matching name or alias (prevents 'Kantor Cabang' stealing 'Kantor Cabang 2')
+        best_match = None
+        best_len = 0
+        for dev in self.devices:
+            if re.search(r'\b' + re.escape(dev.name.lower()) + r'\b', clean_query):
+                if len(dev.name) > best_len:
+                    best_match = dev
+                    best_len = len(dev.name)
+            for alias in dev.aliases:
+                if alias and re.search(r'\b' + re.escape(alias.lower()) + r'\b', clean_query):
+                    if len(alias) > best_len:
+                        best_match = dev
+                        best_len = len(alias)
+
+        if best_match:
+            return best_match
+
         return self.get_default_device() if fallback else None
+
+    def reload(self) -> None:
+        """Reload configuration and devices from disk."""
+        self.config_data = load_yaml(CONFIG_DIR / "config.yaml")
+        self.devices_data = load_yaml(CONFIG_DIR / "devices.yaml")
+        self.devices = []
+        raw_devices = self.devices_data.get("devices", [])
+        for dev_raw in raw_devices:
+            self.devices.append(DeviceConfig(dev_raw))
 
 
 settings = Settings()

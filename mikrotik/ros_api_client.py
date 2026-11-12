@@ -805,7 +805,11 @@ class MikrotikRosApiClient(BaseMikrotikClient):
     def get_routerboard(self) -> OperationResult:
         try:
             res = self._execute("/system/routerboard/print")
-            data = res[0] if res else {}
+            raw_data = res[0] if res else {}
+            data = dict(raw_data)
+            for k, v in raw_data.items():
+                if "-" in k:
+                    data[k.replace("-", "_")] = v
             return OperationResult(success=True, message="Informasi RouterBOARD berhasil diambil.", data=data, device=self.device_name)
         except Exception as e:
             return OperationResult(success=False, error=str(e), device=self.device_name)
@@ -832,13 +836,20 @@ class MikrotikRosApiClient(BaseMikrotikClient):
     def reboot(self) -> OperationResult:
         try:
             self._execute("/system/reboot")
-            return OperationResult(
-                success=True,
-                message=f"🔄 Router '{self.device_name}' sedang melakukan proses REBOOT...\nSistem akan offline sementara dan otomatis kembali aktif.",
-                device=self.device_name,
-            )
         except Exception as e:
-            return OperationResult(success=False, error=str(e), device=self.device_name)
+            err_lower = str(e).lower()
+            disconnect_terms = (
+                "terputus", "broken pipe", "connection reset", "closed",
+                "timed out", "timeout", "koneksi fatal", "fatal", "eof",
+                "connection error", "connection refused", "aborted", "peer",
+            )
+            if not any(term in err_lower for term in disconnect_terms):
+                return OperationResult(success=False, error=str(e), device=self.device_name)
+        return OperationResult(
+            success=True,
+            message=f"🔄 Router '{self.device_name}' sedang melakukan proses REBOOT...\nSistem akan offline sementara dan otomatis kembali aktif.",
+            device=self.device_name,
+        )
 
     def shutdown(self) -> OperationResult:
         try:
@@ -846,6 +857,119 @@ class MikrotikRosApiClient(BaseMikrotikClient):
             return OperationResult(
                 success=True,
                 message=f"🔌 Router '{self.device_name}' sedang melakukan proses SHUTDOWN secara aman.",
+                device=self.device_name,
+            )
+        except Exception as e:
+            return OperationResult(success=False, error=str(e), device=self.device_name)
+
+    def check_router_update(self, channel: str = "stable") -> OperationResult:
+        try:
+            if channel:
+                try:
+                    self._execute("/system/package/update/set", {"channel": channel})
+                except Exception:
+                    pass
+            try:
+                self._execute("/system/package/update/check-for-updates")
+            except Exception:
+                pass
+            res = self._execute("/system/package/update/print")
+            data = res[0] if res else {}
+            installed = data.get("installed-version") or data.get("installed_version") or ""
+            latest = data.get("latest-version") or data.get("latest_version") or ""
+            status_text = data.get("status") or ("New version is available" if latest and latest != installed else "System is up to date")
+            if not latest and ("up to date" in str(status_text).lower() or not (latest and latest != installed)):
+                latest = installed
+            has_update = bool(latest and installed and latest != installed)
+            norm = {
+                "channel": data.get("channel", channel),
+                "installed_version": installed,
+                "installed-version": installed,
+                "latest_version": latest,
+                "latest-version": latest,
+                "status": status_text,
+                "update_available": has_update,
+            }
+            msg = f"Update RouterOS tersedia: v{installed} ➔ v{latest} (Channel: {norm['channel']})." if has_update else f"RouterOS sudah versi terbaru (v{installed})."
+            return OperationResult(success=True, message=msg, data=norm, device=self.device_name)
+        except Exception as e:
+            return OperationResult(success=False, error=str(e), device=self.device_name)
+
+    def install_router_update(self, channel: str = "stable") -> OperationResult:
+        try:
+            if channel:
+                try:
+                    self._execute("/system/package/update/set", {"channel": channel})
+                except Exception:
+                    pass
+            try:
+                self._execute("/system/package/update/install")
+            except Exception as e:
+                err_lower = str(e).lower()
+                disconnect_terms = (
+                    "terputus", "broken pipe", "connection reset", "closed",
+                    "timed out", "timeout", "koneksi fatal", "fatal", "eof",
+                    "connection error", "connection refused", "aborted", "peer",
+                )
+                if not any(term in err_lower for term in disconnect_terms):
+                    raise
+            return OperationResult(
+                success=True,
+                message=(
+                    f"🚀 **Proses Upgrade RouterOS Berhasil Dimulai!**\n\n"
+                    f"• Target Router : **{self.device_name}**\n"
+                    f"• Channel       : `{channel}`\n"
+                    f"• Status        : Router sedang mengunduh paket update dan akan melakukan REBOOT otomatis.\n"
+                    f"⏳ Router akan offline sementara selama 1-3 menit. Pemantauan otomatis akan memberi kabar saat router kembali online."
+                ),
+                data={"status": "INSTALLING_AND_REBOOTING", "device": self.device_name},
+                device=self.device_name,
+            )
+        except Exception as e:
+            return OperationResult(success=False, error=str(e), device=self.device_name)
+
+    def upgrade_routerboard_firmware(self) -> OperationResult:
+        try:
+            self._execute("/system/routerboard/upgrade")
+            rb = self.get_routerboard()
+            rb_data = rb.data if rb.success and isinstance(rb.data, dict) else {}
+            curr = rb_data.get("current-firmware") or rb_data.get("current_firmware", "")
+            upg = rb_data.get("upgrade-firmware") or rb_data.get("upgrade_firmware", "")
+            return OperationResult(
+                success=True,
+                message=(
+                    f"⚡ **Upgrade Firmware RouterBOARD Berhasil!**\n\n"
+                    f"• Target Router    : **{self.device_name}**\n"
+                    f"• Firmware Versi   : `{curr}` ➔ `v{upg}`\n\n"
+                    f"⚠️ *Catatan: Firmware bootloader telah ditulis ke chip BIOS router. Lakukan REBOOT router agar firmware baru mulai digunakan.*"
+                ),
+                data={"status": "UPGRADED_PENDING_REBOOT", "current_firmware": curr, "upgrade_firmware": upg, "device": self.device_name},
+                device=self.device_name,
+            )
+        except Exception as e:
+            return OperationResult(success=False, error=str(e), device=self.device_name)
+
+    def get_firmware_status(self, channel: str = "stable") -> OperationResult:
+        try:
+            rb_res = self.get_routerboard()
+            update_res = self.check_router_update(channel=channel)
+            rb_data = rb_res.data if rb_res.success and isinstance(rb_res.data, dict) else {}
+            upd_data = update_res.data if update_res.success and isinstance(update_res.data, dict) else {}
+
+            curr_fw = rb_data.get("current-firmware") or rb_data.get("current_firmware", "")
+            upg_fw = rb_data.get("upgrade-firmware") or rb_data.get("upgrade_firmware", "")
+            has_rb_update = bool(curr_fw and upg_fw and curr_fw != upg_fw)
+
+            combined = {
+                "routerboard": rb_data,
+                "package_update": upd_data,
+                "has_os_update": upd_data.get("update_available", False),
+                "has_rb_update": has_rb_update,
+            }
+            return OperationResult(
+                success=True,
+                message="Informasi status firmware dan update RouterOS berhasil diambil.",
+                data=combined,
                 device=self.device_name,
             )
         except Exception as e:

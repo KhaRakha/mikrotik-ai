@@ -57,3 +57,16 @@ devices:
   password: ''
   is_default: false
   description: Simulasi Router MikroTik untuk demonstrasi dan testing offline
+- id: kantor_cabang_2
+  name: Kantor Cabang 2
+  aliases:
+  - kantor cabang 2
+  - kantor_cabang_2
+  host: 10.20.188.6
+  port: 8728
+  protocol: api
+  use_ssl: false
+  username: magang
+  password: magang2026
+  is_default: false
+  description: Router MikroTik Kantor Cabang 2

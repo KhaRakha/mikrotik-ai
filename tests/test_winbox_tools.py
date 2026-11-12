@@ -6,7 +6,7 @@ Validates functionality across Mock client, Security Manager, and Hermes Agent.
 from __future__ import annotations
 
 import unittest
-from config.settings import settings
+from config.settings import DeviceConfig, settings
 from core.agent import hermes_agent
 from core.confirmation import confirmation_manager
 from core.security import security_manager
@@ -44,8 +44,17 @@ class TestWinboxTools(unittest.TestCase):
     def setUp(self):
         self.device = "mock_demo"
         self.mock_client = MockMikrotikClient()
+        self.mock_dev = DeviceConfig({"id": "mock_demo", "name": "mock_demo", "host": "127.0.0.1", "protocol": "mock"})
+        if not any(d.name == "mock_demo" for d in settings.devices):
+            settings.devices.append(self.mock_dev)
         self.admin_id = settings.admin_telegram_ids[0] if settings.admin_telegram_ids else 5605485301
-        self.viewer_id = settings.viewer_telegram_ids[0] if settings.viewer_telegram_ids else 5724056699
+        self.viewer_id = 999123
+        if self.viewer_id not in settings.viewer_telegram_ids:
+            settings.viewer_telegram_ids.append(self.viewer_id)
+        if self.viewer_id not in settings.allowed_telegram_ids:
+            settings.allowed_telegram_ids.append(self.viewer_id)
+        if self.viewer_id in settings.admin_telegram_ids:
+            settings.admin_telegram_ids.remove(self.viewer_id)
         self._orig_google_key = hermes_agent.google_api_key
         self._orig_openai_key = hermes_agent.openai_api_key
         hermes_agent.google_api_key = ""
@@ -54,6 +63,8 @@ class TestWinboxTools(unittest.TestCase):
     def tearDown(self):
         hermes_agent.google_api_key = self._orig_google_key
         hermes_agent.openai_api_key = self._orig_openai_key
+        if hasattr(self, "mock_dev") and self.mock_dev in settings.devices:
+            settings.devices.remove(self.mock_dev)
 
     # =========================================================================
     # TOOLS MENU TESTS

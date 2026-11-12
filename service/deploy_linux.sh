@@ -21,14 +21,22 @@ echo "[1/5] Memperbarui paket sistem dan menginstall dependensi..."
 apt-get update -y
 apt-get install -y python3 python3-pip python3-venv git curl iputils-ping
 
+# Detect user owning the directory
+RUN_USER=$(stat -c '%U' "$PROJECT_DIR" 2>/dev/null || echo "root")
+
 echo "[2/5] Menyiapkan Python Virtual Environment..."
-if [ ! -d "venv" ]; then
-    python3 -m venv venv
+if [ -d "$PROJECT_DIR/.venv" ]; then
+    VENV_DIR="$PROJECT_DIR/.venv"
+elif [ -d "$PROJECT_DIR/venv" ]; then
+    VENV_DIR="$PROJECT_DIR/venv"
+else
+    VENV_DIR="$PROJECT_DIR/.venv"
+    python3 -m venv "$VENV_DIR"
 fi
 
 echo "[3/5] Menginstall dependensi requirements.txt..."
-./venv/bin/pip install --upgrade pip
-./venv/bin/pip install -r requirements.txt
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install -r requirements.txt
 
 echo "[4/5] Memasang Systemd Service (mikrotik-ai.service)..."
 SERVICE_FILE="/etc/systemd/system/mikrotik-ai.service"
@@ -41,9 +49,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=$RUN_USER
 WorkingDirectory=$PROJECT_DIR
-ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/service/watchdog.py
+ExecStart=$VENV_DIR/bin/python $PROJECT_DIR/service/watchdog.py
 Restart=always
 RestartSec=5
 StandardOutput=journal

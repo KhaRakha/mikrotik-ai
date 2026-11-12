@@ -55,6 +55,10 @@ def test_natural_language_add_ip_with_confirmation():
         settings.admin_telegram_ids.append(user_id)
         settings.allowed_telegram_ids.append(user_id)
 
+    from mikrotik.tools import remove_ip_address
+    remove_ip_address(device="Kantor Utama", address="192.168.77.1/24")
+    remove_ip_address(device="Kantor Utama", address="192.168.77.1")
+
     prompt = "Tambahkan IP 192.168.77.1/24 di interface ether2"
     result = hermes_agent.process_message(user_id=user_id, username="NetAdmin", text=prompt)
 
@@ -69,7 +73,9 @@ def test_natural_language_add_ip_with_confirmation():
     assert exec_res.success is True
 
 
-def test_natural_language_edit_ip_with_confirmation():
+def test_natural_language_edit_ip_with_confirmation(monkeypatch):
+    monkeypatch.setattr(hermes_agent, "google_api_key", "")
+    monkeypatch.setattr(hermes_agent, "openai_api_key", "")
     user_id = 888123
     if user_id not in settings.admin_telegram_ids:
         settings.admin_telegram_ids.append(user_id)
@@ -84,7 +90,9 @@ def test_natural_language_edit_ip_with_confirmation():
     assert "Konfirmasi Pengubahan IP Address" in result["reply"]
 
 
-def test_natural_language_remove_ip_with_confirmation():
+def test_natural_language_remove_ip_with_confirmation(monkeypatch):
+    monkeypatch.setattr(hermes_agent, "google_api_key", "")
+    monkeypatch.setattr(hermes_agent, "openai_api_key", "")
     user_id = 888123
     if user_id not in settings.admin_telegram_ids:
         settings.admin_telegram_ids.append(user_id)

@@ -32,18 +32,30 @@ except Exception:
 
 def get_python_executable() -> str:
     """Find the best Python executable."""
-    # 1. Direct Python 3.14 installed path
-    py314 = Path(os.path.expanduser("~")) / "AppData" / "Local" / "Programs" / "Python" / "Python314" / "python.exe"
-    if py314.exists():
-        return str(py314)
+    # 1. Project local virtual environments (.venv or venv)
+    for venv_name in (".venv", "venv"):
+        unix_py = PROJECT_ROOT / venv_name / "bin" / "python"
+        if unix_py.exists():
+            return str(unix_py)
+        win_py = PROJECT_ROOT / venv_name / "Scripts" / "python.exe"
+        if win_py.exists():
+            return str(win_py)
+
     # 2. Current sys.executable
     if sys.executable and "python" in sys.executable.lower():
         return sys.executable
-    # 3. Check Hermes venv
-    hermes_py = Path(os.path.expanduser("~")) / "AppData" / "Local" / "hermes" / "hermes-agent" / "venv" / "Scripts" / "python.exe"
-    if hermes_py.exists():
-        return str(hermes_py)
-    # 4. Default python
+
+    # 3. Direct Python 3.14 installed path (Windows)
+    py314 = Path(os.path.expanduser("~")) / "AppData" / "Local" / "Programs" / "Python" / "Python314" / "python.exe"
+    if py314.exists():
+        return str(py314)
+
+    # 4. Check Hermes venv
+    hermes_win = Path(os.path.expanduser("~")) / "AppData" / "Local" / "hermes" / "hermes-agent" / "venv" / "Scripts" / "python.exe"
+    if hermes_win.exists():
+        return str(hermes_win)
+
+    # 5. Default python
     return "python"
 
 

@@ -329,6 +329,35 @@ Perangkat Kantor Utama (10.20.33.240) kini telah ONLINE KEMBALI!
 
 ---
 
+### Skenario 7 — Upgrade Firmware & RouterOS Langsung dari Telegram Bot
+Administrator jaringan dapat memantau ketersediaan versi terbaru dan meng-upgrade sistem RouterOS maupun firmware bootloader (BIOS) RouterBOARD langsung melalui chat Telegram dengan perlindungan konfirmasi dua tahap dan pemantauan pemulihan otomatis:
+
+1. **Pemeriksaan Firmware & Update:**
+   - Command: `/firmware [nama_router] [channel]` atau `/check_update`
+   - Bahasa Alami: *"Cek update firmware router"*, *"Apakah ada update RouterOS?"*, *"Status firmware"*, *"Cek frimware"*
+   - Bot menyajikan perbandingan versi aktif vs rilis terbaru, channel (`stable`, `testing`, `long-term`), status bootloader hardware BIOS, dan tombol interaktif:
+     - `[ 🚀 Upgrade RouterOS Sekarang ]` (jika paket baru tersedia)
+     - `[ ⚡ Upgrade Bootloader Firmware ]` (jika firmware BIOS hardware baru tersedia)
+     - `[ 🔄 Refresh / Cek Update ]`
+     - `[ 🔁 Reboot Router ]`
+
+2. **Eksekusi Upgrade Aman (Two-Phase Confirmation):**
+   - Command: `/upgrade [nama_router] [channel] [force]` (contoh: `/upgrade Kantor_Utama stable`)
+   - Bahasa Alami: *"Upgrade firmware router kantor utama"*, *"Perbarui firmware router"*
+   - Bot memunculkan kartu peringatan keselamatan jaringan (router akan melakukan reboot otomatis dan offline selama 1-3 menit).
+   - Administrator menyetujui melalui tombol `[ ✅ YA (Setuju) ]` atau ketik *"Ya"*. Router langsung mengunduh paket resmi dan melakukan flashing serta reboot secara aman.
+   - Hak akses khusus Administrator: Pengguna dengan role Viewer dicegat dan ditolak secara otomatis demi keamanan jaringan.
+
+3. **Reboot Router & Pembaruan Bootloader BIOS:**
+   - Command: `/reboot [nama_router]` atau `/restart`
+   - Setelah meng-upgrade bootloader BIOS RouterBOARD, bot secara otomatis menampilkan tombol `[ 🔄 Reboot Router Sekarang ]` agar firmware BIOS baru aktif.
+
+4. **Pemantauan Otomatis Pasca-Upgrade (Proactive Recovery Watcher):**
+   - Setelah perintah upgrade atau reboot dieksekusi, bot secara proaktif menjalankan *background watcher*.
+   - Saat router selesai reboot dan kembali online, bot otomatis mengirimkan pesan pemberitahuan ke Telegram beserta durasi waktu offline dan status versi firmware terbarunya.
+
+---
+
 ## 🛡️ Role-Based Access Control (RBAC)
 Sistem membedakan izin pengguna secara hierarkis:
 1. **Administrator (`ADMIN_TELEGRAM_IDS`)**: Memiliki akses penuh untuk monitoring, diagnosa, dan mengeksekusi konfirmasi perubahan konfigurasi (`WRITE`).

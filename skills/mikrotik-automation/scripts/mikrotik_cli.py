@@ -11,8 +11,31 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root
+# Auto re-exec with project venv python if needed
+candidates = [
+    Path(__file__).resolve().parent.parent.parent.parent,
+    Path(os.path.expanduser("~")) / "mikrotik-ai",
+    Path("/home/magang/mikrotik-ai"),
+]
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+venv_py = None
+for c in candidates:
+    if (c / "core" / "agent.py").exists():
+        PROJECT_ROOT = c
+        for vname in (".venv", "venv"):
+            p = c / vname / "bin" / "python"
+            if p.exists():
+                venv_py = str(p)
+                break
+            p_win = c / vname / "Scripts" / "python.exe"
+            if p_win.exists():
+                venv_py = str(p_win)
+                break
+        break
+
+if venv_py and os.path.realpath(sys.executable) != os.path.realpath(venv_py):
+    os.execv(venv_py, [venv_py] + sys.argv)
+
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.agent import hermes_agent
