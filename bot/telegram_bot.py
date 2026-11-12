@@ -35,6 +35,7 @@ from bot.handlers import (
     role_command,
     start_command,
     status_command,
+    topology_command,
     upgrade_command,
 )
 from config.settings import settings
@@ -72,6 +73,8 @@ def create_bot_app() -> Application:
     app.add_handler(CommandHandler("remove_ip", remove_ip_command))
     app.add_handler(CommandHandler("edit_ip", edit_ip_command))
     app.add_handler(CommandHandler("status", status_command))
+    app.add_handler(CommandHandler("topology", topology_command))
+    app.add_handler(CommandHandler("topologi", topology_command))
     app.add_handler(CommandHandler("firmware", firmware_command))
     app.add_handler(CommandHandler("check_update", firmware_command))
     app.add_handler(CommandHandler("upgrade", upgrade_command))

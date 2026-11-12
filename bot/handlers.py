@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 import time
 from typing import Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -131,6 +132,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"Role Anda: **{role}**\n\n"
         f"**Perintah Cepat:**\n"
         f"• `/status` - Cek ringkas kondisi router aktif\n"
+        f"• `/topology` - Peta topologi jaringan (`/topology scan`, `/topology image`, `/topology diff`)\n"
         f"• `/firmware` - Cek status versi RouterOS dan firmware bootloader RouterBOARD\n"
         f"• `/upgrade` - Upgrade sistem RouterOS & firmware router langsung dari bot\n"
         f"• `/reboot` - Mulai ulang (reboot) router secara aman dengan konfirmasi 2 tahap\n"
@@ -815,6 +817,79 @@ async def discover_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await msg.edit_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
 
+async def topology_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler for /topology command (view map, scan, diagram, compare diff)."""
+    user = update.effective_user
+    if not user:
+        return
+
+    if not security_manager.is_user_authorized(user.id):
+        await update.message.reply_text(
+            f"⛔ **Akses Ditolak**\nUser ID `{user.id}` tidak diizinkan menggunakan bot ini.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    args = context.args or []
+    subcmd = args[0].lower() if args else "summary"
+
+    await update.message.chat.send_action("typing")
+
+    if subcmd in ("scan", "refresh", "pindai"):
+        progress_msg = await update.message.reply_text("🔄 **Memindai seluruh router MikroTik...**\n_Mohon tunggu sebentar._", parse_mode=ParseMode.MARKDOWN)
+        subnet = args[1] if len(args) > 1 else ""
+        res = await asyncio.to_thread(TOOL_REGISTRY["scan_network_topology"], subnet=subnet, force_refresh=True)
+        img_path = res.get("image_path")
+        text_summary = res.get("text_summary", "✅ Pemindaian topologi selesai.")
+
+        if img_path and Path(img_path).exists():
+            try:
+                with open(img_path, "rb") as photo_f:
+                    await update.message.reply_photo(
+                        photo=photo_f,
+                        caption=text_summary[:1024],
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                await progress_msg.delete()
+                return
+            except Exception as pe:
+                logger.warning("Gagal mengirim gambar topologi: %s", pe)
+
+        await _safe_edit_message_text(progress_msg, text_summary)
+
+    elif subcmd in ("image", "diagram", "gambar", "visual"):
+        progress_msg = await update.message.reply_text("🎨 **Menghasilkan diagram visual topologi jaringan...**", parse_mode=ParseMode.MARKDOWN)
+        res = await asyncio.to_thread(TOOL_REGISTRY["generate_topology_diagram"])
+        img_path = res.get("image_path")
+        caption = res.get("caption", "🌐 Bagan Topologi Jaringan MikroTik")
+
+        if img_path and Path(img_path).exists():
+            try:
+                with open(img_path, "rb") as photo_f:
+                    await update.message.reply_photo(
+                        photo=photo_f,
+                        caption=caption[:1024],
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                await progress_msg.delete()
+                return
+            except Exception as pe:
+                logger.warning("Gagal mengirim photo: %s", pe)
+
+        await _safe_edit_message_text(progress_msg, "⚠️ Gagal menghasilkan diagram visual gambar topologi.")
+
+    elif subcmd in ("diff", "compare", "perubahan", "bandingkan"):
+        res = await asyncio.to_thread(TOOL_REGISTRY["compare_topology_snapshots"])
+        summary = res.get("summary_text", "✅ Tidak ada riwayat snapshot untuk dibandingkan.")
+        await _safe_reply_text(update.message, summary)
+
+    else:
+        # Default: summary view
+        res = await asyncio.to_thread(TOOL_REGISTRY["get_network_topology"], format="summary")
+        text = res.get("text", "🌐 Tidak ada data topologi yang tersedia.")
+        await _safe_reply_text(update.message, text)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handler for natural language user messages."""
     user = update.effective_user
@@ -875,7 +950,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                         )
                     )
             else:
-                await _safe_reply_text(update.message, reply_text)
+                image_path = result.get("image_path")
+                if image_path and Path(image_path).exists():
+                    try:
+                        with open(image_path, "rb") as photo_f:
+                            await update.message.reply_photo(
+                                photo=photo_f,
+                                caption=reply_text[:1024] if reply_text else None,
+                                parse_mode=ParseMode.MARKDOWN,
+                            )
+                    except Exception as pe:
+                        logger.warning("Gagal mengirim photo Telegram: %s. Fallback ke teks biasa.", pe)
+                        await _safe_reply_text(update.message, reply_text)
+                else:
+                    await _safe_reply_text(update.message, reply_text)
     except Exception as e:
         logger.error("Error saat memproses pesan user: %s", e, exc_info=True)
         await _safe_reply_text(

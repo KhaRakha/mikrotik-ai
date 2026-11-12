@@ -36,6 +36,18 @@ GREETING_MODIFIERS = {
 }
 ALL_GREETING_TOKENS = GREETING_ROOTS | GREETING_MODIFIERS
 
+GLOBAL_NETWORK_TOOLS = (
+    "register_device",
+    "remove_device",
+    "discover_devices",
+    "ping_host",
+    "check_server_port",
+    "scan_network_topology",
+    "get_network_topology",
+    "compare_topology_snapshots",
+    "generate_topology_diagram",
+)
+
 
 class ConversationMemory:
     """Manages short-term per-user conversation history for multi-turn contextual dialogs."""
@@ -235,6 +247,7 @@ class HermesAIAgent:
         llm_success = False
         reply_content = ""
         pending_act = None
+        captured_img = None
 
         if self.google_api_key or self.openai_api_key:
             try:
@@ -242,6 +255,7 @@ class HermesAIAgent:
                 if reply_dict and reply_dict.get("reply"):
                     reply_content = reply_dict["reply"]
                     pending_act = reply_dict.get("pending_action")
+                    captured_img = reply_dict.get("image_path")
                     llm_success = True
             except Exception as e:
                 logger.warning("LLM reasoning encountered error (%s), using Heuristic Reasoner.", e)
@@ -251,6 +265,7 @@ class HermesAIAgent:
             reply_dict = self._heuristic_reasoning(user_id, username, text_clean, device_name)
             reply_content = reply_dict["reply"]
             pending_act = reply_dict.get("pending_action")
+            captured_img = reply_dict.get("image_path")
 
         # Prepend simulation notice if target device is running in mock fallback mode
         if pending_act and pending_act.action_name == "register_device":
@@ -289,6 +304,7 @@ class HermesAIAgent:
             "reply": reply_content,
             "action_required": pending_act is not None,
             "pending_action": pending_act,
+            "image_path": captured_img,
         }
 
     def _create_write_confirmation(
@@ -567,6 +583,7 @@ class HermesAIAgent:
             turn_contents = [dict(c) for c in base_contents]
             turn = 0
             max_turns = 4
+            captured_image_path = None
             try:
                 with httpx.Client(timeout=25.0) as client:
                     while turn < max_turns:
@@ -600,7 +617,7 @@ class HermesAIAgent:
                             text_parts = [p.get("text", "") for p in parts if "text" in p]
                             final_text = "\n".join(text_parts).strip()
                             if final_text:
-                                return {"reply": final_text, "pending_action": None}
+                                return {"reply": final_text, "pending_action": None, "image_path": captured_image_path}
                             break
 
                         # Append model's tool calls to contents
@@ -611,7 +628,7 @@ class HermesAIAgent:
                         for call in tool_calls:
                             fn_name = call.get("name")
                             args = call.get("args", {})
-                            if fn_name not in ("register_device", "remove_device", "discover_devices", "ping_host", "check_server_port"):
+                            if fn_name not in GLOBAL_NETWORK_TOOLS:
                                 if "device" not in args or not args["device"]:
                                     args["device"] = device_name
                             else:
@@ -628,6 +645,9 @@ class HermesAIAgent:
                                 tool_res = func(**args)
                             else:
                                 tool_res = {"success": False, "error": f"Tool {fn_name} tidak ditemukan"}
+
+                            if isinstance(tool_res, dict) and tool_res.get("image_path"):
+                                captured_image_path = tool_res.get("image_path")
 
                             func_response_parts.append({
                                 "functionResponse": {
@@ -673,6 +693,7 @@ class HermesAIAgent:
 
         max_turns = 4
         turn = 0
+        captured_image_path = None
         with httpx.Client(timeout=25.0) as client:
             while turn < max_turns:
                 turn += 1
@@ -694,14 +715,14 @@ class HermesAIAgent:
                 if not tool_calls:
                     final_content = choice.get("content", "").strip()
                     if final_content:
-                        return {"reply": final_content, "pending_action": None}
+                        return {"reply": final_content, "pending_action": None, "image_path": captured_image_path}
                     break
 
                 messages.append(choice)
                 for tc in tool_calls:
                     fn_name = tc["function"]["name"]
                     args = json.loads(tc["function"]["arguments"] or "{}")
-                    if fn_name not in ("register_device", "remove_device", "discover_devices", "ping_host", "check_server_port"):
+                    if fn_name not in GLOBAL_NETWORK_TOOLS:
                         if "device" not in args or not args["device"]:
                             args["device"] = device_name
                     else:
@@ -713,6 +734,8 @@ class HermesAIAgent:
 
                     func = TOOL_REGISTRY.get(fn_name)
                     res = func(**args) if func else {"error": "Tool not found"}
+                    if isinstance(res, dict) and res.get("image_path"):
+                        captured_image_path = res.get("image_path")
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
@@ -1975,6 +1998,110 @@ class HermesAIAgent:
                 lines.append("✨ Perangkat Anda telah menggunakan versi firmware dan sistem operasi paling mutakhir dan stabil.")
 
             return {"reply": "\n".join(lines), "pending_action": None}
+
+        # 11.6 Network Topology & Network Mapping (Get)
+        # A. Visual Diagram / Image Generation
+        if any(w in lower for w in (
+            "diagram topologi", "gambar topologi", "peta visual", "visualisasi topologi",
+            "bagan topologi", "diagram jaringan", "gambar peta jaringan", "visualisasi jaringan",
+            "diagram router", "grafik topologi", "grafik jaringan",
+        )):
+            res = TOOL_REGISTRY["generate_topology_diagram"]()
+            img_path = res.get("image_path", "")
+            caption = res.get("caption", "🌐 Diagram Topologi Jaringan MikroTik")
+            return {
+                "reply": caption,
+                "pending_action": None,
+                "image_path": img_path,
+            }
+
+        # B. Topology Comparison & Change Detection
+        if any(w in lower for w in (
+            "bandingkan topologi", "perubahan topologi", "compare topologi", "link putus",
+            "ada link putus", "perubahan jaringan", "diff topologi", "deteksi perubahan topologi",
+            "apakah ada perubahan topologi", "apakah ada perubahan jaringan",
+        )):
+            res = TOOL_REGISTRY["compare_topology_snapshots"]()
+            summary = res.get("summary_text", "✅ Tidak ada perubahan topologi yang terdeteksi.")
+            return {"reply": summary, "pending_action": None}
+
+        # C. Scan / Refresh Topology
+        if any(w in lower for w in (
+            "scan topologi", "pindai topologi", "refresh topologi", "pemindaian topologi",
+            "scan ulang topologi", "update peta jaringan", "pemetaan ulang jaringan",
+        )):
+            res = TOOL_REGISTRY["scan_network_topology"](force_refresh=True)
+            text_sum = res.get("text_summary", "✅ Pemindaian topologi berhasil diselesaikan.")
+            img_path = res.get("image_path")
+            return {
+                "reply": text_sum,
+                "pending_action": None,
+                "image_path": img_path,
+            }
+
+        # D. Router Neighbors (MNDP / LLDP)
+        if any(w in lower for w in (
+            "tetangga router", "neighbor", "tetangga mikrotik", "siapa tetangga",
+            "mndp", "lldp", "router tetangga",
+        )) and not any(w in lower for w in ("scan", "diagram", "gambar")):
+            res = TOOL_REGISTRY["get_router_neighbors"](device=device_name)
+            nbrs = res.get("neighbors", [])
+            verified = res.get("verified_connections", [])
+            dev_label = res.get("device", device_name)
+
+            lines = [f"📡 **Daftar Tetangga (Neighbors) MNDP/LLDP pada {dev_label}** ({len(nbrs)} terdeteksi):\n"]
+            if not nbrs:
+                lines.append("  _(Tidak ada tetangga router/switch yang terdeteksi pada interface router ini)_")
+            else:
+                for idx, nb in enumerate(nbrs, 1):
+                    ident = nb.get("identity") or "Unknown"
+                    ip_addr = nb.get("address") or "-"
+                    mac = nb.get("mac_address") or "-"
+                    loc_if = nb.get("interface") or "-"
+                    rem_if = nb.get("remote_interface") or "-"
+                    board = nb.get("board") or "-"
+                    proto = (nb.get("protocol") or "MNDP").upper()
+                    lines.append(
+                        f"{idx}. **{ident}** (`{ip_addr}`)\n"
+                        f"   • Interface Lokal : `{loc_if}` ➔ Remote: `{rem_if}`\n"
+                        f"   • MAC / Hardware  : `{mac}` ({board})\n"
+                        f"   • Protokol Discovery: `[{proto}]`"
+                    )
+
+            if verified:
+                lines.append(f"\n✅ **Koneksi Router Terverifikasi (2-Arah):**")
+                for v in verified:
+                    lines.append(f"• `{v.get('local_interface')}` ⟷ `{v.get('remote_interface')}` pada **{v.get('neighbor_identity')}**")
+
+            return {"reply": "\n".join(lines), "pending_action": None}
+
+        # E. Specific Interface Inter-Connection Query
+        if any(w in lower for w in ("terhubung ke mana", "nyambung kemana", "koneksi interface", "port nyambung", "sambungan port")):
+            iface_match = re.search(r"\b(ether\d+|sfp\d+|wlan\d+|bridge\w*)\b", lower)
+            target_if = iface_match.group(1) if iface_match else ""
+            res = TOOL_REGISTRY["get_connected_interfaces"](device=device_name, interface=target_if)
+            conns = res.get("connections", [])
+            if not conns:
+                reply = f"ℹ️ Tidak ditemukan koneksi antar-router yang terdaftar pada interface `{target_if or 'semua'}` router **{device_name}**."
+            else:
+                lines = [f"🔗 **Koneksi Interface pada Router {device_name}:**\n"]
+                for c in conns:
+                    lines.append(
+                        f"• `{c['local_interface']}` ⟷ `{c['remote_interface']}` pada **[{c['remote_router']}]** "
+                        f"(`[{c['protocol'].upper()}]` - {c['status']})"
+                    )
+                reply = "\n".join(lines)
+            return {"reply": reply, "pending_action": None}
+
+        # F. Full Topology Overview / Network Map
+        if any(w in lower for w in (
+            "topologi", "peta jaringan", "peta router", "hubungan antar router",
+            "network map", "koneksi antar router", "router offline", "kondisi topologi",
+            "cek topologi", "lihat topologi", "peta topologi",
+        )):
+            res = TOOL_REGISTRY["get_network_topology"](format="summary")
+            summary_text = res.get("text", "🌐 Tidak ada data topologi yang tersedia.")
+            return {"reply": summary_text, "pending_action": None}
 
         # 12. RouterBOARD Info (Get)
         if any(w in lower for w in ("routerboard", "serial number", "firmware", "bios router", "nomor seri")):

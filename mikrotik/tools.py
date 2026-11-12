@@ -5,6 +5,7 @@ Exposes structured Python functions and OpenAPI/JSON schemas for Hermes AI Agent
 
 from __future__ import annotations
 
+from pathlib import Path
 import socket
 import time
 from typing import Any, Dict, List, Optional
@@ -443,6 +444,204 @@ def get_firmware_status(device: str = "", channel: str = "stable") -> Dict[str, 
     return client.get_firmware_status(channel=channel).to_dict()
 
 
+# =============================================================================
+# NETWORK TOPOLOGY DISCOVERY & MAPPING TOOLS
+# =============================================================================
+
+def scan_network_topology(subnet: str = "", force_refresh: bool = False, **kwargs: Any) -> Dict[str, Any]:
+    """
+    [READ-ONLY] Memindai seluruh router MikroTik di jaringan, mengumpulkan tabel MNDP/LLDP,
+    membangun peta topologi inter-router, dan menyimpan snapshot ke database.
+    """
+    from core.topology import topology_scanner, TopologyVisualizer
+    snapshot = topology_scanner.scan_topology(subnet_cidr=subnet or None)
+    visualizer = TopologyVisualizer(snapshot)
+    text_summary = visualizer.render_text()
+    img_path = visualizer.render_image()
+
+    return {
+        "success": True,
+        "message": f"Pemindaian topologi berhasil diselesaikan ({snapshot.total_routers} router, {snapshot.total_links} link).",
+        "snapshot_id": snapshot.snapshot_id,
+        "summary": {
+            "total_routers": snapshot.total_routers,
+            "online_routers": snapshot.online_routers,
+            "offline_routers": snapshot.offline_routers,
+            "total_links": snapshot.total_links,
+            "verified_links": snapshot.verified_links,
+            "redundant_links": snapshot.redundant_links,
+            "isolated_routers": snapshot.isolated_routers,
+        },
+        "text_summary": text_summary,
+        "image_path": img_path,
+        "links": [l.to_dict() for l in snapshot.inter_router_links],
+    }
+
+
+def get_network_topology(format: str = "summary", **kwargs: Any) -> Dict[str, Any]:
+    """
+    [READ-ONLY] Mengambil peta topologi jaringan MikroTik saat ini beserta status hubungan antar-router.
+    format: 'summary' (ringkasan teks), 'json' (data struktur lengkap), atau 'image' (file gambar diagram).
+    """
+    from core.topology import topology_scanner, snapshot_db, TopologyVisualizer
+    snapshot = snapshot_db.get_latest_snapshot()
+    if not snapshot:
+        snapshot = topology_scanner.scan_topology()
+
+    visualizer = TopologyVisualizer(snapshot)
+    fmt = format.lower().strip()
+
+    if fmt == "json":
+        return {
+            "success": True,
+            "format": "json",
+            "data": snapshot.to_dict(),
+        }
+    elif fmt == "image":
+        img_path = visualizer.render_image()
+        return {
+            "success": True,
+            "format": "image",
+            "image_path": img_path,
+            "caption": f"Bagan Topologi Jaringan MikroTik ({snapshot.total_routers} Router, {snapshot.verified_links} Verified Links)",
+        }
+    else:
+        text_summary = visualizer.render_text()
+        return {
+            "success": True,
+            "format": "summary",
+            "text": text_summary,
+            "summary": {
+                "total_routers": snapshot.total_routers,
+                "online_routers": snapshot.online_routers,
+                "offline_routers": snapshot.offline_routers,
+                "total_links": snapshot.total_links,
+                "verified_links": snapshot.verified_links,
+                "redundant_links": snapshot.redundant_links,
+                "isolated_routers": snapshot.isolated_routers,
+            },
+            "inter_router_links": [l.to_dict() for l in snapshot.inter_router_links],
+        }
+
+
+def get_router_neighbors(device: str = "") -> Dict[str, Any]:
+    """
+    [READ-ONLY] Mengambil daftar tetangga perangkat (MNDP / LLDP) yang terdeteksi oleh router target.
+    """
+    from core.topology import snapshot_db, NetworkTopologyGraph
+    client = device_manager.get_client(device)
+    raw_res = client.get_neighbors()
+
+    # Correlate with graph model if snapshot exists
+    correlated_neighbors = []
+    snapshot = snapshot_db.get_latest_snapshot()
+    if snapshot:
+        graph = NetworkTopologyGraph(snapshot)
+        correlated_neighbors = graph.get_neighbors_for(client.device_name)
+
+    return {
+        "success": raw_res.success,
+        "device": client.device_name,
+        "message": f"Ditemukan {len(raw_res.data or [])} tetangga melalui discovery MNDP/LLDP.",
+        "neighbors": raw_res.data or [],
+        "verified_connections": correlated_neighbors,
+    }
+
+
+def get_connected_interfaces(device: str = "", interface: str = "") -> Dict[str, Any]:
+    """
+    [READ-ONLY] Memeriksa interface mana yang saling terhubung antara router target dengan router lainnya.
+    """
+    from core.topology import snapshot_db, topology_scanner
+    snapshot = snapshot_db.get_latest_snapshot()
+    if not snapshot:
+        snapshot = topology_scanner.scan_topology()
+
+    dev_clean = device.lower().strip()
+    if_clean = interface.lower().strip()
+
+    matches = []
+    for link in snapshot.links:
+        src_match = (dev_clean in link.source.lower()) if dev_clean else True
+        tgt_match = (dev_clean in link.target.lower()) if dev_clean else True
+
+        if src_match and (not if_clean or if_clean in link.source_interface.lower()):
+            matches.append({
+                "local_router": link.source,
+                "local_interface": link.source_interface,
+                "remote_router": link.target_identity or link.target,
+                "remote_interface": link.target_interface,
+                "protocol": link.protocol,
+                "status": link.verification_status,
+                "is_redundant": link.is_redundant,
+            })
+        elif tgt_match and (not if_clean or if_clean in link.target_interface.lower()):
+            matches.append({
+                "local_router": link.target,
+                "local_interface": link.target_interface,
+                "remote_router": link.source,
+                "remote_interface": link.source_interface,
+                "protocol": link.protocol,
+                "status": link.verification_status,
+                "is_redundant": link.is_redundant,
+            })
+
+    return {
+        "success": True,
+        "device_queried": device,
+        "interface_queried": interface,
+        "found_connections_count": len(matches),
+        "connections": matches,
+    }
+
+
+def compare_topology_snapshots(snapshot_id_a: Optional[int] = None, snapshot_id_b: Optional[int] = None, **kwargs: Any) -> Dict[str, Any]:
+    """
+    [READ-ONLY] Membandingkan dua snapshot topologi jaringan untuk mendeteksi perubahan router,
+    link baru, link putus, atau pergeseran interface.
+    """
+    from core.topology import snapshot_db
+    diff = snapshot_db.compare_snapshots(old_id=snapshot_id_a, new_id=snapshot_id_b)
+    return {
+        "success": True,
+        "has_changes": diff.get("has_changes", False),
+        "old_snapshot_time": diff.get("old_timestamp"),
+        "new_snapshot_time": diff.get("new_timestamp"),
+        "changes": diff.get("changes", {}),
+        "summary_text": diff.get("summary_text", ""),
+    }
+
+
+def generate_topology_diagram(filename: str = "topology.png", **kwargs: Any) -> Dict[str, Any]:
+    """
+    [READ-ONLY] Menghasilkan file gambar visual diagram topologi jaringan MikroTik (.PNG)
+    menggunakan NetworkX dan Matplotlib untuk dikirimkan melalui Telegram.
+    """
+    from core.topology import topology_scanner, snapshot_db, TopologyVisualizer
+    snapshot = snapshot_db.get_latest_snapshot()
+    if not snapshot:
+        snapshot = topology_scanner.scan_topology()
+
+    visualizer = TopologyVisualizer(snapshot)
+    out_path = Path("data") / filename
+    img_path = visualizer.render_image(str(out_path))
+
+    return {
+        "success": True,
+        "image_path": str(img_path),
+        "total_routers": snapshot.total_routers,
+        "total_links": snapshot.total_links,
+        "verified_links": snapshot.verified_links,
+        "timestamp": snapshot.timestamp,
+        "caption": (
+            f"🌐 **Bagan Topologi Jaringan MikroTik**\n"
+            f"📊 {snapshot.total_routers} Router ({snapshot.online_routers} Online) | "
+            f"{snapshot.total_links} Link ({snapshot.verified_links} Terverifikasi)\n"
+            f"📅 _Waktu: {snapshot.timestamp}_"
+        ),
+    }
+
+
 # Map function names to Python callables
 TOOL_REGISTRY: Dict[str, Any] = {
     "connect_mikrotik": connect_mikrotik,
@@ -498,6 +697,13 @@ TOOL_REGISTRY: Dict[str, Any] = {
     "install_router_update": install_router_update,
     "upgrade_routerboard_firmware": upgrade_routerboard_firmware,
     "get_firmware_status": get_firmware_status,
+    # Network Topology & Mapping Menu
+    "scan_network_topology": scan_network_topology,
+    "get_network_topology": get_network_topology,
+    "get_router_neighbors": get_router_neighbors,
+    "get_connected_interfaces": get_connected_interfaces,
+    "compare_topology_snapshots": compare_topology_snapshots,
+    "generate_topology_diagram": generate_topology_diagram,
 }
 
 # OpenAI / Gemini tool function definitions schema
@@ -1233,6 +1439,90 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "properties": {
                     "device": {"type": "string", "description": "Nama router target"},
                     "channel": {"type": "string", "description": "Kanal rilis pembaruan (misal: 'stable', 'long-term', 'testing')", "default": "stable"}
+                },
+            },
+        },
+    },
+    # =========================================================================
+    # TOPOLOGY & NETWORK MAPPING SCHEMAS
+    # =========================================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "scan_network_topology",
+            "description": "Memindai seluruh router MikroTik secara otomatis, mengumpulkan neighbor MNDP/LLDP, dan memetakan topologi jaringan terbaru",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subnet": {"type": "string", "description": "Subnet CIDR opsional (misal: '10.20.33.0/24') untuk mencari router tambahan yang belum terdaftar"},
+                    "force_refresh": {"type": "boolean", "description": "Paksa refresh scan jaringan secara langsung", "default": True}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_network_topology",
+            "description": "Melihat peta topologi jaringan MikroTik saat ini, daftar koneksi antar-router, dan status online/offline setiap router",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "description": "Format output: 'summary' (ringkasan teks), 'json' (data terstruktur), atau 'image' (diagram gambar)", "default": "summary"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_router_neighbors",
+            "description": "Melihat daftar perangkat tetangga (neighbors) MNDP/LLDP yang terhubung langsung ke router target beserta interface-nya",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string", "description": "Nama router yang ingin diperiksa tetangganya (misal: 'Kantor Utama')"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_connected_interfaces",
+            "description": "Mengetahui hubungan antar-interface spesifik router (misal: interface ether2 pada R1 terhubung ke router mana dan interface apa)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device": {"type": "string", "description": "Nama router (misal: 'Kantor Utama', 'R1')"},
+                    "interface": {"type": "string", "description": "Nama interface lokal yang ingin diperiksa (misal: 'ether2', 'ether1-WAN')"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_topology_snapshots",
+            "description": "Membandingkan kondisi topologi jaringan sekarang dengan sebelumnya untuk mendeteksi router baru, router mati, link terputus, atau perubahan port",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "snapshot_id_a": {"type": "integer", "description": "ID snapshot lama (opsional)"},
+                    "snapshot_id_b": {"type": "integer", "description": "ID snapshot baru (opsional)"}
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_topology_diagram",
+            "description": "Menghasilkan gambar visual diagram topologi jaringan MikroTik (.PNG) untuk dikirimkan ke Telegram",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Nama file gambar keluaran", "default": "topology.png"}
                 },
             },
         },

@@ -81,6 +81,36 @@ class PingResult:
     status: str = "OK"
 
 
+@dataclass
+class NeighborInfo:
+    interface: str
+    address: str = ""
+    mac_address: str = ""
+    identity: str = ""
+    platform: str = "MikroTik"
+    version: str = ""
+    remote_interface: str = ""
+    board: str = ""
+    protocol: str = "mndp"
+    age: str = ""
+    uptime: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "interface": self.interface,
+            "address": self.address,
+            "mac_address": self.mac_address,
+            "identity": self.identity,
+            "platform": self.platform,
+            "version": self.version,
+            "remote_interface": self.remote_interface,
+            "board": self.board,
+            "protocol": self.protocol,
+            "age": self.age,
+            "uptime": self.uptime,
+        }
+
+
 class BaseMikrotikClient(ABC):
     """Abstract base client for communicating with MikroTik RouterOS."""
 
@@ -106,6 +136,11 @@ class BaseMikrotikClient(ABC):
     @abstractmethod
     def get_interfaces(self) -> OperationResult:
         """Retrieve list of network interfaces and traffic counters."""
+        pass
+
+    @abstractmethod
+    def get_neighbors(self) -> OperationResult:
+        """Retrieve discovered network neighbors via MNDP/LLDP (/ip/neighbor/print)."""
         pass
 
     @abstractmethod

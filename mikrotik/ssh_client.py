@@ -84,6 +84,53 @@ class MikrotikSshClient(BaseMikrotikClient):
         except Exception as e:
             return OperationResult(success=False, error=str(e), device=self.device_name)
 
+    def get_neighbors(self) -> OperationResult:
+        try:
+            out = self._exec_command("/ip neighbor print detail without-paging")
+            records: List[Dict[str, Any]] = []
+            current: Dict[str, str] = {}
+            for line in out.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                if re.match(r"^\d+\s+", line):
+                    if current:
+                        records.append(current)
+                        current = {}
+                    line = re.sub(r"^\d+\s+", "", line)
+
+                matches = re.findall(r'([\w-]+)=(?:"([^"]*)"|([^\s]+))', line)
+                for k, v_quoted, v_unquoted in matches:
+                    val = v_quoted if v_quoted != "" else v_unquoted
+                    current[k] = val
+
+            if current:
+                records.append(current)
+
+            normalized = []
+            for item in records:
+                normalized.append({
+                    "interface": item.get("interface", ""),
+                    "address": item.get("address", "") or item.get("address4", ""),
+                    "mac_address": (item.get("mac-address", "") or item.get("mac", "")).upper(),
+                    "identity": item.get("identity", ""),
+                    "platform": item.get("platform", "MikroTik"),
+                    "version": item.get("version", ""),
+                    "remote_interface": item.get("interface-name", "") or item.get("remote-interface", ""),
+                    "board": item.get("board", ""),
+                    "protocol": (item.get("discovered-by", "") or item.get("discovery-protocol", "mndp")).lower(),
+                    "age": item.get("age", ""),
+                    "uptime": item.get("uptime", ""),
+                })
+            return OperationResult(
+                success=True,
+                message=f"Berhasil mengambil {len(normalized)} neighbor via SSH.",
+                data=normalized,
+                device=self.device_name,
+            )
+        except Exception as e:
+            return OperationResult(success=False, error=str(e), device=self.device_name)
+
     def get_ip_addresses(self) -> OperationResult:
         try:
             out = self._exec_command("/ip address print detail without-paging")

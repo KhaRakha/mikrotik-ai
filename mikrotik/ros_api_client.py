@@ -244,6 +244,44 @@ class MikrotikRosApiClient(BaseMikrotikClient):
         except Exception as e:
             return OperationResult(success=False, error=str(e), device=self.device_name)
 
+    def get_neighbors(self) -> OperationResult:
+        try:
+            res = self._execute("/ip/neighbor/print")
+            normalized = []
+            for item in res:
+                local_if = item.get("interface", "")
+                remote_ip = item.get("address", "") or item.get("address4", "")
+                mac_addr = (item.get("mac-address", "") or item.get("mac", "")).upper()
+                identity = item.get("identity", "")
+                platform = item.get("platform", "MikroTik")
+                version = item.get("version", "")
+                remote_if = item.get("interface-name", "") or item.get("remote-interface", "")
+                board = item.get("board", "")
+                proto = (item.get("discovered-by", "") or item.get("discovery-protocol", "mndp")).lower()
+                age = item.get("age", "")
+                uptime = item.get("uptime", "")
+                normalized.append({
+                    "interface": local_if,
+                    "address": remote_ip,
+                    "mac_address": mac_addr,
+                    "identity": identity,
+                    "platform": platform,
+                    "version": version,
+                    "remote_interface": remote_if,
+                    "board": board,
+                    "protocol": proto,
+                    "age": age,
+                    "uptime": uptime,
+                })
+            return OperationResult(
+                success=True,
+                message=f"Berhasil mengambil {len(normalized)} neighbor.",
+                data=normalized,
+                device=self.device_name,
+            )
+        except Exception as e:
+            return OperationResult(success=False, error=str(e), device=self.device_name)
+
     def get_ip_addresses(self) -> OperationResult:
         try:
             res = self._execute("/ip/address/print")

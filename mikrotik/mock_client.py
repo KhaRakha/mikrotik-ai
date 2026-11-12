@@ -150,6 +150,36 @@ class MockMikrotikClient(BaseMikrotikClient):
             {"time": "sep/14 12:45:10", "topics": "system,warning", "message": "WAN interface traffic spike detected: 35 Mbps"},
         ]
 
+        self.custom_neighbors: Optional[List[Dict[str, Any]]] = None
+        self._default_neighbors = [
+            {
+                "interface": "ether2-LAN-Kantor",
+                "address": "192.168.88.1",
+                "mac_address": "48:8F:5A:22:33:44",
+                "identity": "Kantor Cabang",
+                "platform": "MikroTik",
+                "version": "7.15.2",
+                "remote_interface": "ether1-Uplink",
+                "board": "RB750Gr3",
+                "protocol": "mndp",
+                "age": "15s",
+                "uptime": "12d 08:44:21",
+            },
+            {
+                "interface": "ether3-Hotspot",
+                "address": "192.168.10.1",
+                "mac_address": "48:8F:5A:55:66:77",
+                "identity": "Lab PTI",
+                "platform": "MikroTik",
+                "version": "7.14.3",
+                "remote_interface": "ether1-WAN",
+                "board": "hEX S",
+                "protocol": "lldp",
+                "age": "20s",
+                "uptime": "5d 02:11:00",
+            },
+        ]
+
     def test_connection(self) -> OperationResult:
         return OperationResult(
             success=True,
@@ -175,6 +205,93 @@ class MockMikrotikClient(BaseMikrotikClient):
             data=self._interfaces,
             device=self.device_name,
             latency_ms=3.4,
+        )
+
+    def set_mock_neighbors(self, neighbors: List[Dict[str, Any]]) -> None:
+        """Allow injecting specific neighbor data for testing topologies."""
+        self.custom_neighbors = neighbors
+
+    def get_neighbors(self) -> OperationResult:
+        if self.custom_neighbors is not None:
+            return OperationResult(
+                success=True,
+                message=f"Berhasil mengambil {len(self.custom_neighbors)} neighbor.",
+                data=self.custom_neighbors,
+                device=self.device_name,
+                latency_ms=1.5,
+            )
+
+        name_lower = self.device_name.lower()
+        if "cabang 2" in name_lower:
+            data = [
+                {
+                    "interface": "ether2",
+                    "address": "192.168.88.1",
+                    "mac_address": "48:8F:5A:22:33:55",
+                    "identity": "Kantor Cabang",
+                    "platform": "MikroTik",
+                    "version": "7.15.2",
+                    "remote_interface": "ether4",
+                    "board": "RB750Gr3",
+                    "protocol": "mndp",
+                    "age": "10s",
+                    "uptime": "4d 06:12:00",
+                }
+            ]
+        elif "cabang" in name_lower:
+            data = [
+                {
+                    "interface": "ether1-Uplink",
+                    "address": "10.20.33.240",
+                    "mac_address": "CC:2D:E0:1A:2B:02",
+                    "identity": "Kantor Utama",
+                    "platform": "MikroTik",
+                    "version": "7.15.2",
+                    "remote_interface": "ether2-LAN-Kantor",
+                    "board": "RB750Gr3",
+                    "protocol": "mndp",
+                    "age": "15s",
+                    "uptime": "12d 08:44:21",
+                },
+                {
+                    "interface": "ether4",
+                    "address": "10.20.188.6",
+                    "mac_address": "48:8F:5A:88:99:AA",
+                    "identity": "Kantor Cabang 2",
+                    "platform": "MikroTik",
+                    "version": "7.12.1",
+                    "remote_interface": "ether2",
+                    "board": "RB951Ui-2HnD",
+                    "protocol": "mndp",
+                    "age": "10s",
+                    "uptime": "4d 06:12:00",
+                },
+            ]
+        elif "lab" in name_lower:
+            data = [
+                {
+                    "interface": "ether1-WAN",
+                    "address": "10.20.33.240",
+                    "mac_address": "CC:2D:E0:1A:2B:03",
+                    "identity": "Kantor Utama",
+                    "platform": "MikroTik",
+                    "version": "7.15.2",
+                    "remote_interface": "ether3-Hotspot",
+                    "board": "RB750Gr3",
+                    "protocol": "lldp",
+                    "age": "20s",
+                    "uptime": "12d 08:44:21",
+                }
+            ]
+        else:
+            data = self._default_neighbors
+
+        return OperationResult(
+            success=True,
+            message=f"Berhasil mengambil {len(data)} neighbor.",
+            data=data,
+            device=self.device_name,
+            latency_ms=1.8,
         )
 
     def get_ip_addresses(self) -> OperationResult:
@@ -660,10 +777,15 @@ class MockMikrotikClient(BaseMikrotikClient):
     # WINBOX SYSTEM MENU (MOCK IMPLEMENTATIONS)
     # =========================================================================
     def get_identity(self) -> OperationResult:
+        ident = self._identity
+        if self.device_name and self.device_name not in ("127.0.0.1", "Unknown", "Simulasi Router", "mock_demo"):
+            clean_name = self.device_name.replace(" [Simulasi Offline]", "").strip()
+            if clean_name:
+                ident = clean_name
         return OperationResult(
             success=True,
-            message=f"Identitas router: '{self._identity}'",
-            data={"name": self._identity},
+            message=f"Identitas router: '{ident}'",
+            data={"name": ident},
             device=self.device_name,
             latency_ms=1.5,
         )

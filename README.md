@@ -60,6 +60,7 @@ mikrotik-ai/
 │   ├── security.py              # Whitelist guard, Dangerous command filter, RBAC
 │   ├── confirmation.py          # State store & token approval untuk write actions
 │   ├── monitor.py               # Proactive background monitoring & automated alerting
+│   ├── topology.py              # Auto network topology discovery, graph correlation & mapping
 │   └── audit.py                 # SQLite & JSONL audit trail logger
 ├── mikrotik/
 │   ├── base.py                  # Antarmuka abstrak klien MikroTik
@@ -92,6 +93,7 @@ mikrotik-ai/
     ├── test_confirmation.py     # Unit test sistem konfirmasi
     ├── test_agent_tools.py      # Integrasi test skenario PRD (1, 2, 3) & hak akses Viewer
     ├── test_proactive_monitor.py # Unit test background proactive alerting (Down, Recovery, High CPU)
+    ├── test_topology.py         # Unit & integrasi test pemetaan topologi, mapper, graph & visualizer
     ├── test_server_tools.py     # Unit test universal server & port tools
     └── test_audit_log.py        # Unit test pencatatan audit log
 ```
@@ -355,6 +357,34 @@ Administrator jaringan dapat memantau ketersediaan versi terbaru dan meng-upgrad
 4. **Pemantauan Otomatis Pasca-Upgrade (Proactive Recovery Watcher):**
    - Setelah perintah upgrade atau reboot dieksekusi, bot secara proaktif menjalankan *background watcher*.
    - Saat router selesai reboot dan kembali online, bot otomatis mengirimkan pesan pemberitahuan ke Telegram beserta durasi waktu offline dan status versi firmware terbarunya.
+
+---
+
+### Skenario 9 — Topologi Jaringan & Pemetaan Otomatis (Network Topology Discovery)
+Hermes AI Agent mampu melakukan discovery multi-router secara otomatis, mengumpulkan tetangga MNDP/LLDP, mengorelasikan link fisik/logis antar-port, serta menghasilkan diagram visual dan perbandingan snapshot:
+
+1. **Peta Topologi Jaringan & Ringkasan Antar-Router:**
+   - Command: `/topology` atau `/topology scan`
+   - Bahasa Alami: *"Coba cek topologi seluruh jaringan"*, *"Tampilkan peta topologi router"*
+   - Bot memindai seluruh router MikroTik secara paralel, melakukan korelasi tabel MAC & MNDP, dan menyajikan ringkasan router online/offline serta link antar-router yang terverifikasi.
+
+2. **Diagram Visual Bagan Topologi (.PNG):**
+   - Command: `/topology image` atau `/topology diagram`
+   - Bahasa Alami: *"Buatkan gambar diagram topologi jaringan"*, *"Kirimkan visualisasi topologi"*
+   - Bot merender diagram jaringan beresolusi tinggi menggunakan Matplotlib dan NetworkX, lengkap dengan status warna perangkat (🟢 Online / 🔴 Offline / 🟡 Simulasi), nama router, IP, dan port interface yang saling terhubung (`etherX ↔ etherY`), lalu mengirimkannya langsung sebagai foto ke Telegram.
+
+3. **Pemeriksaan Tetangga Router (Neighbors MNDP/LLDP):**
+   - Bahasa Alami: *"Siapa tetangga router Kantor Utama?"*, *"Cek neighbor MNDP router R1"*
+   - Bot menampilkan seluruh perangkat MikroTik/switch/AP tetangga yang terdeteksi beserta remote interface dan MAC address.
+
+4. **Pemeriksaan Koneksi Interface Spesifik:**
+   - Bahasa Alami: *"Interface ether2 Kantor Utama nyambung ke router mana?"*, *"Port ether3 terhubung ke mana?"*
+   - Bot menjawab secara spesifik perangkat target dan port remote yang tersambung.
+
+5. **Deteksi Perubahan Topologi (Snapshot Change Detection):**
+   - Command: `/topology diff`
+   - Bahasa Alami: *"Bandingkan topologi sekarang dengan kemarin"*, *"Apakah ada link yang putus atau router baru?"*
+   - Bot membandingkan snapshot SQLite riwayat topologi untuk mendeteksi penambahan router, router offline, pemutusan link kabel, atau perpindahan port interface.
 
 ---
 

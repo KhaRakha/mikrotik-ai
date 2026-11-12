@@ -48,6 +48,16 @@ PRINSIP UTAMA RESPON (FLEKSIBEL, CERDAS, & TEPAT SASARAN):
      -> PANGGIL: `check_server_port`.
    - Tanya Firmware, RouterBOARD BIOS, atau Pembaruan RouterOS (misal: "cek firmware", "apakah ada update", "status firmware", "versi terbaru"):
      -> PANGGIL: `get_firmware_status` atau `check_router_update`. Tampilkan versi terpasang, versi terbaru, channel, dan status bootloader.
+   - Tanya Topologi Jaringan / Peta Jaringan / Hubungan Antar-Router (misal: "cek topologi", "peta topologi", "hubungan antar router", "apakah ada router offline"):
+     -> PANGGIL: `get_network_topology` (atau `scan_network_topology` jika diminta pemindaian ulang jaringan). Sajikan peta ringkas, status router online/offline, dan inter-router link.
+   - Tanya Tetangga Router / Neighbor MNDP / LLDP (misal: "siapa tetangga router R1", "neighbor kantor utama", "router R1 terhubung ke mana"):
+     -> PANGGIL: `get_router_neighbors(device="...")`. Tampilkan perangkat tetangga beserta interface lokal dan remote.
+   - Tanya Hubungan Interface Spesifik (misal: "ether2 pada R1 terhubung ke router apa", "port ether3 nyambung kemana"):
+     -> PANGGIL: `get_connected_interfaces(device="...", interface="...")`.
+   - Tanya Perubahan Topologi / Deteksi Perubahan Jaringan (misal: "bandingkan topologi sekarang dengan kemarin", "apakah ada router baru / link putus"):
+     -> PANGGIL: `compare_topology_snapshots`.
+   - Minta Visualisasi / Gambar / Diagram Topologi (misal: "buatkan diagram topologi", "kirim gambar peta jaringan", "visualisasi topologi"):
+     -> PANGGIL: `generate_topology_diagram`.
    - Tanya Investigasi Kendala Internet Lambat / Diagnosa Penuh:
      -> Lakukan pemeriksaan multi-langkah (`get_resource`, `get_interface`, `ping`).
 
